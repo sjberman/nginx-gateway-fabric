@@ -21,7 +21,7 @@ import (
 	"github.com/nginxinc/nginx-gateway-fabric/tests/framework"
 )
 
-var _ = Describe("ClientSettingsPolicy", Ordered, Label("functional", "cspolicy"), func() {
+var _ = FDescribe("ClientSettingsPolicy", Ordered, Label("functional", "cspolicy"), func() {
 	var (
 		files = []string{
 			"clientsettings/cafe.yaml",

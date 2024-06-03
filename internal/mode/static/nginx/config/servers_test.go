@@ -666,37 +666,37 @@ func TestCreateServers(t *testing.T) {
 
 	expMatchPairs := httpMatchPairs{
 		"1_0": {
-			{Method: "POST", RedirectPath: "@rule0-route0"},
-			{Method: "PATCH", RedirectPath: "@rule0-route1"},
-			{RedirectPath: "@rule0-route2", Any: true},
+			{Method: "POST", RedirectPath: "/_ngf-internal-rule0-route0"},
+			{Method: "PATCH", RedirectPath: "/_ngf-internal-rule0-route1"},
+			{RedirectPath: "/_ngf-internal-rule0-route2", Any: true},
 		},
 		"1_1": {
 			{
 				Method:       "GET",
 				Headers:      []string{"Version:V1", "test:foo", "my-header:my-value"},
 				QueryParams:  []string{"GrEat=EXAMPLE", "test=foo=bar"},
-				RedirectPath: "@rule1-route0",
+				RedirectPath: "/_ngf-internal-rule1-route0",
 			},
 		},
 		"1_6": {
-			{RedirectPath: "@rule6-route0", Headers: []string{"redirect:this"}},
+			{RedirectPath: "/_ngf-internal-rule6-route0", Headers: []string{"redirect:this"}},
 		},
 		"1_8": {
 			{
 				Headers:      []string{"rewrite:this"},
-				RedirectPath: "@rule8-route0",
+				RedirectPath: "/_ngf-internal-rule8-route0",
 			},
 		},
 		"1_10": {
 			{
 				Headers:      []string{"filter:this"},
-				RedirectPath: "@rule10-route0",
+				RedirectPath: "/_ngf-internal-rule10-route0",
 			},
 		},
 		"1_12": {
 			{
 				Method:       "GET",
-				RedirectPath: "@rule12-route0",
+				RedirectPath: "/_ngf-internal-rule12-route0",
 				Headers:      nil,
 				QueryParams:  nil,
 				Any:          false,
@@ -705,7 +705,7 @@ func TestCreateServers(t *testing.T) {
 		"1_17": {
 			{
 				Method:       "GET",
-				RedirectPath: "@rule17-route0",
+				RedirectPath: "/_ngf-internal-rule17-route0",
 			},
 		},
 	}
@@ -744,17 +744,20 @@ func TestCreateServers(t *testing.T) {
 
 		return []http.Location{
 			{
-				Path:            "@rule0-route0",
+				Internal:        true,
+				Path:            "/_ngf-internal-rule0-route0",
 				ProxyPass:       "http://test_foo_80$request_uri",
 				ProxySetHeaders: httpBaseHeaders,
 			},
 			{
-				Path:            "@rule0-route1",
+				Internal:        true,
+				Path:            "/_ngf-internal-rule0-route1",
 				ProxyPass:       "http://test_foo_80$request_uri",
 				ProxySetHeaders: httpBaseHeaders,
 			},
 			{
-				Path:            "@rule0-route2",
+				Internal:        true,
+				Path:            "/_ngf-internal-rule0-route2",
 				ProxyPass:       "http://test_foo_80$request_uri",
 				ProxySetHeaders: httpBaseHeaders,
 			},
@@ -763,7 +766,8 @@ func TestCreateServers(t *testing.T) {
 				HTTPMatchKey: ssl + "1_0",
 			},
 			{
-				Path:            "@rule1-route0",
+				Internal:        true,
+				Path:            "/_ngf-internal-rule1-route0",
 				ProxyPass:       "http://$test__route1_rule1$request_uri",
 				ProxySetHeaders: httpBaseHeaders,
 			},
@@ -828,7 +832,8 @@ func TestCreateServers(t *testing.T) {
 				},
 			},
 			{
-				Path: "@rule6-route0",
+				Internal: true,
+				Path:     "/_ngf-internal-rule6-route0",
 				Return: &http.Return{
 					Body: "$scheme://foo.example.com:8080$request_uri",
 					Code: 302,
@@ -855,8 +860,9 @@ func TestCreateServers(t *testing.T) {
 				ProxySetHeaders: rewriteProxySetHeaders,
 			},
 			{
-				Path:            "@rule8-route0",
-				Rewrites:        []string{"^/rewrite-with-headers(.*)$ /prefix-replacement$1 break"},
+				Internal:        true,
+				Path:            "/_ngf-internal-rule8-route0",
+				Rewrites:        []string{"^ $request_uri", "^/rewrite-with-headers(.*)$ /prefix-replacement$1 break"},
 				ProxyPass:       "http://test_foo_80",
 				ProxySetHeaders: rewriteProxySetHeaders,
 			},
@@ -881,7 +887,8 @@ func TestCreateServers(t *testing.T) {
 				},
 			},
 			{
-				Path: "@rule10-route0",
+				Internal: true,
+				Path:     "/_ngf-internal-rule10-route0",
 				Return: &http.Return{
 					Code: http.StatusInternalServerError,
 				},
@@ -900,7 +907,8 @@ func TestCreateServers(t *testing.T) {
 				ProxySetHeaders: httpBaseHeaders,
 			},
 			{
-				Path:            "@rule12-route0",
+				Internal:        true,
+				Path:            "/_ngf-internal-rule12-route0",
 				ProxyPass:       "http://test_foo_80$request_uri",
 				ProxySetHeaders: httpBaseHeaders,
 			},
@@ -1005,12 +1013,14 @@ func TestCreateServers(t *testing.T) {
 				},
 			},
 			{
-				Path:            "@rule17-route0",
+				Internal:        true,
+				Path:            "/_ngf-internal-rule17-route0",
 				ProxyPass:       "http://test_foo_80$request_uri",
 				ProxySetHeaders: httpBaseHeaders,
 				Includes: []string{
 					includesFolder + "/match-addition.conf",
 				},
+				Rewrites: []string{"^ $request_uri break"},
 			},
 			{
 				Path:         "= /addition-header-match",
@@ -1601,7 +1611,8 @@ func TestCreateRewritesValForRewriteFilter(t *testing.T) {
 				},
 			},
 			expected: &rewriteConfig{
-				Rewrite: "^ /full-path break",
+				InternalRewrite: "^ $request_uri",
+				MainRewrite:     "^ /full-path break",
 			},
 			msg: "full path",
 		},
@@ -1614,7 +1625,8 @@ func TestCreateRewritesValForRewriteFilter(t *testing.T) {
 				},
 			},
 			expected: &rewriteConfig{
-				Rewrite: "^/original(.*)$ /prefix-path$1 break",
+				InternalRewrite: "^ $request_uri",
+				MainRewrite:     "^/original(.*)$ /prefix-path$1 break",
 			},
 			msg: "prefix path no trailing slashes",
 		},
@@ -1627,7 +1639,8 @@ func TestCreateRewritesValForRewriteFilter(t *testing.T) {
 				},
 			},
 			expected: &rewriteConfig{
-				Rewrite: "^/original(?:/(.*))?$ /$1 break",
+				InternalRewrite: "^ $request_uri",
+				MainRewrite:     "^/original(?:/(.*))?$ /$1 break",
 			},
 			msg: "prefix path empty string",
 		},
@@ -1640,7 +1653,8 @@ func TestCreateRewritesValForRewriteFilter(t *testing.T) {
 				},
 			},
 			expected: &rewriteConfig{
-				Rewrite: "^/original(?:/(.*))?$ /$1 break",
+				InternalRewrite: "^ $request_uri",
+				MainRewrite:     "^/original(?:/(.*))?$ /$1 break",
 			},
 			msg: "prefix path /",
 		},
@@ -1653,7 +1667,8 @@ func TestCreateRewritesValForRewriteFilter(t *testing.T) {
 				},
 			},
 			expected: &rewriteConfig{
-				Rewrite: "^/original(?:/(.*))?$ /trailing/$1 break",
+				InternalRewrite: "^ $request_uri",
+				MainRewrite:     "^/original(?:/(.*))?$ /trailing/$1 break",
 			},
 			msg: "prefix path replacement with trailing /",
 		},
@@ -1666,7 +1681,8 @@ func TestCreateRewritesValForRewriteFilter(t *testing.T) {
 				},
 			},
 			expected: &rewriteConfig{
-				Rewrite: "^/original/(.*)$ /prefix-path/$1 break",
+				InternalRewrite: "^ $request_uri",
+				MainRewrite:     "^/original/(.*)$ /prefix-path/$1 break",
 			},
 			msg: "prefix path original with trailing /",
 		},
@@ -1679,7 +1695,8 @@ func TestCreateRewritesValForRewriteFilter(t *testing.T) {
 				},
 			},
 			expected: &rewriteConfig{
-				Rewrite: "^/original/(.*)$ /trailing/$1 break",
+				InternalRewrite: "^ $request_uri",
+				MainRewrite:     "^/original/(.*)$ /trailing/$1 break",
 			},
 			msg: "prefix path both with trailing slashes",
 		},
@@ -2027,12 +2044,24 @@ func TestCreateProxyPass(t *testing.T) {
 func TestCreateMatchLocation(t *testing.T) {
 	g := NewWithT(t)
 
-	expected := http.Location{
-		Path: "/path",
+	expectedNoGRPC := http.Location{
+		Path:     "/path",
+		Internal: true,
 	}
 
-	result := createMatchLocation("/path")
-	g.Expect(result).To(Equal(expected))
+	grpc := false
+	result := createMatchLocation("/path", grpc)
+	g.Expect(result).To(Equal(expectedNoGRPC))
+
+	expectedWithGRPC := http.Location{
+		Path:     "/path",
+		Internal: true,
+		Rewrites: []string{"^ $request_uri break"},
+	}
+
+	grpc = true
+	result = createMatchLocation("/path", grpc)
+	g.Expect(result).To(Equal(expectedWithGRPC))
 }
 
 func TestGenerateProxySetHeaders(t *testing.T) {

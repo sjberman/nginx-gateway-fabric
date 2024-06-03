@@ -38,6 +38,10 @@ server {
 
         {{ range $l := $s.Locations }}
     location {{ $l.Path }} {
+        {{ if $l.Internal -}}
+        internal;
+        {{ end }}
+
         {{- range $i := $l.Includes }}
         include {{ $i }};
         {{- end -}}
@@ -85,7 +89,7 @@ server {
             {{- end }}
         {{- end }}
     }
-        {{ end }}
+        {{- end }}
 
         {{- if $s.GRPC }}
         include /etc/nginx/grpc-error-locations.conf;

@@ -205,8 +205,10 @@ func createServer(virtualServer dataplane.VirtualServer, serverID int) (http.Ser
 // rewriteConfig contains the configuration for a location to rewrite paths,
 // as specified in a URLRewrite filter
 type rewriteConfig struct {
-	// Rewrite rewrites the original URI to the new URI (ex: /coffee -> /beans)
-	Rewrite string
+	// InternalRewrite rewrites an internal URI to the original URI (ex: /coffee_prefix_route0 -> /coffee)
+	InternalRewrite string
+	// MainRewrite rewrites the original URI to the new URI (ex: /coffee -> /beans)
+	MainRewrite string
 }
 
 type httpMatchPairs map[string][]routeMatch
@@ -235,7 +237,7 @@ func createLocations(server *dataplane.VirtualServer, serverID int) ([]http.Loca
 			buildLocations := extLocations
 
 			if len(rule.MatchRules) != 1 || !isPathOnlyMatch(r.Match) {
-				intLocation, match := initializeInternalLocation(pathRuleIdx, matchRuleIdx, r.Match)
+				intLocation, match := initializeInternalLocation(pathRuleIdx, matchRuleIdx, r.Match, grpc)
 				buildLocations = []http.Location{intLocation}
 				matches = append(matches, match)
 			}
@@ -359,9 +361,10 @@ func initializeInternalLocation(
 	pathruleIdx,
 	matchRuleIdx int,
 	match dataplane.Match,
+	grpc bool,
 ) (http.Location, routeMatch) {
-	path := fmt.Sprintf("@rule%d-route%d", pathruleIdx, matchRuleIdx)
-	return createMatchLocation(path), createRouteMatch(match, path)
+	path := fmt.Sprintf("%s-rule%d-route%d", http.InternalRoutePathPrefix, pathruleIdx, matchRuleIdx)
+	return createMatchLocation(path, grpc), createRouteMatch(match, path)
 }
 
 // updateLocationsForFilters updates the existing locations with any relevant filters.
@@ -393,8 +396,11 @@ func updateLocationsForFilters(
 	responseHeaders := generateResponseHeaders(&matchRule.Filters)
 	for i := range buildLocations {
 		if rewrites != nil {
-			if rewrites.Rewrite != "" {
-				buildLocations[i].Rewrites = append(buildLocations[i].Rewrites, rewrites.Rewrite)
+			if buildLocations[i].Internal && rewrites.InternalRewrite != "" {
+				buildLocations[i].Rewrites = append(buildLocations[i].Rewrites, rewrites.InternalRewrite)
+			}
+			if rewrites.MainRewrite != "" {
+				buildLocations[i].Rewrites = append(buildLocations[i].Rewrites, rewrites.MainRewrite)
 			}
 		}
 		buildLocations[i].ProxySetHeaders = proxySetHeaders
@@ -511,9 +517,10 @@ func createRewritesValForRewriteFilter(filter *dataplane.HTTPURLRewriteFilter, p
 	rewrites := &rewriteConfig{}
 
 	if filter.Path != nil {
+		rewrites.InternalRewrite = "^ $request_uri"
 		switch filter.Path.Type {
 		case dataplane.ReplaceFullPath:
-			rewrites.Rewrite = fmt.Sprintf("^ %s break", filter.Path.Replacement)
+			rewrites.MainRewrite = fmt.Sprintf("^ %s break", filter.Path.Replacement)
 		case dataplane.ReplacePrefixMatch:
 			filterPrefix := filter.Path.Replacement
 			if filterPrefix == "" {
@@ -538,7 +545,7 @@ func createRewritesValForRewriteFilter(filter *dataplane.HTTPURLRewriteFilter, p
 				replacement = fmt.Sprintf("%s/$1", filterPrefix)
 			}
 
-			rewrites.Rewrite = fmt.Sprintf("%s %s break", regex, replacement)
+			rewrites.MainRewrite = fmt.Sprintf("%s %s break", regex, replacement)
 		}
 	}
 
@@ -645,10 +652,19 @@ func createProxyPass(
 	return protocol + "://" + backendName + requestURI
 }
 
-func createMatchLocation(path string) http.Location {
-	return http.Location{
-		Path: path,
+func createMatchLocation(path string, grpc bool) http.Location {
+	var rewrites []string
+	if grpc {
+		rewrites = []string{"^ $request_uri break"}
 	}
+
+	loc := http.Location{
+		Path:     path,
+		Internal: true,
+		Rewrites: rewrites,
+	}
+
+	return loc
 }
 
 func generateProxySetHeaders(filters *dataplane.HTTPFilters, grpc bool) []http.Header {

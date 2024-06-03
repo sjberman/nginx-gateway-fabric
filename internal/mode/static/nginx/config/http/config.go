@@ -1,5 +1,7 @@
 package http
 
+const InternalRoutePathPrefix = "/_ngf-internal"
+
 // Server holds all configuration for an HTTP server.
 type Server struct {
 	SSL           *SSL
@@ -25,6 +27,7 @@ type Location struct {
 	Rewrites        []string
 	Includes        []string
 	GRPC            bool
+	Internal        bool
 }
 
 // Header defines an HTTP header to be passed to the proxied server.

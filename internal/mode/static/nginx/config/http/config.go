@@ -7,7 +7,7 @@ type Server struct {
 	SSL           *SSL
 	ServerName    string
 	Locations     []Location
-	Includes      []string
+	Includes      []Include
 	Port          int32
 	IsDefaultHTTP bool
 	IsDefaultSSL  bool
@@ -25,7 +25,7 @@ type Location struct {
 	Return          *Return
 	ResponseHeaders ResponseHeaders
 	Rewrites        []string
-	Includes        []string
+	Includes        []Include
 	GRPC            bool
 	Internal        bool
 }
@@ -98,7 +98,7 @@ type Map struct {
 	Parameters []MapParameter
 }
 
-// Parameter defines a Value and Result pair in a Map.
+// MapParameter defines a Value and Result pair in a Map.
 type MapParameter struct {
 	Value  string
 	Result string
@@ -108,4 +108,10 @@ type MapParameter struct {
 type ProxySSLVerify struct {
 	TrustedCertificate string
 	Name               string
+}
+
+// Include defines a file that's included via the include directive
+type Include struct {
+	Name    string
+	Content []byte
 }

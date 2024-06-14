@@ -227,14 +227,14 @@ func buildServers(g *graph.Graph, generator policies.ConfigGenerator) (http, ssl
 
 	httpServers, sslServers := httpRules.buildServers(), sslRules.buildServers()
 
-	additions := buildAdditions(g.Gateway.Policies, g.GlobalSettings, generator)
+	pols := buildPolicies(g.Gateway.Policies)
 
 	for i := range httpServers {
-		httpServers[i].Additions = additions
+		httpServers[i].Policies = pols
 	}
 
 	for i := range sslServers {
-		sslServers[i].Additions = additions
+		sslServers[i].Policies = pols
 	}
 
 	return httpServers, sslServers
@@ -349,7 +349,7 @@ func (hpr *hostPathRules) upsertRoute(
 			}
 		}
 
-		additions := buildAdditions(route.Policies, globalSettings, hpr.generator)
+		pols := buildPolicies(route.Policies)
 
 		for _, h := range hostnames {
 			for _, m := range rule.Matches {
@@ -375,7 +375,7 @@ func (hpr *hostPathRules) upsertRoute(
 					BackendGroup: newBackendGroup(rule.BackendRefs, routeNsName, i),
 					Filters:      filters,
 					Match:        convertMatch(m),
-					Additions:    additions,
+					Policies:     pols,
 				})
 
 				hpr.rulesPerHost[h][key] = hostRule
@@ -672,32 +672,18 @@ func buildBaseHTTPConfig(g *graph.Graph) BaseHTTPConfig {
 	return baseConfig
 }
 
-func buildAdditions(
-	policies []*graph.Policy,
-	globalSettings *policies.GlobalSettings,
-	generator policies.ConfigGenerator,
-) []Addition {
-	if len(policies) == 0 {
-		return nil
-	}
+func buildPolicies(
+	graphPolicies []*graph.Policy,
+) []policies.Policy {
+	finalPolicies := make([]policies.Policy, 0, len(graphPolicies))
 
-	additions := make([]Addition, 0, len(policies))
-
-	for _, policy := range policies {
+	for _, policy := range graphPolicies {
 		if !policy.Valid {
 			continue
 		}
 
-		additions = append(additions, Addition{
-			Bytes: generator.Generate(policy.Source, globalSettings),
-			Identifier: fmt.Sprintf(
-				"%s_%s_%s",
-				policy.Source.GetObjectKind().GroupVersionKind().Kind,
-				policy.Source.GetNamespace(),
-				policy.Source.GetName(),
-			),
-		})
+		finalPolicies = append(finalPolicies, policy.Source)
 	}
 
-	return additions
+	return finalPolicies
 }

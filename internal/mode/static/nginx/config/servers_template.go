@@ -33,7 +33,7 @@ server {
     server_name {{ $s.ServerName }};
 
     {{- range $i := $s.Includes }}
-    include {{ $i }};
+    include {{ $i.Name }};
     {{ end -}}
 
         {{ range $l := $s.Locations }}
@@ -43,7 +43,7 @@ server {
         {{ end }}
 
         {{- range $i := $l.Includes }}
-        include {{ $i }};
+        include {{ $i.Name }};
         {{- end -}}
 
         {{ range $r := $l.Rewrites }}

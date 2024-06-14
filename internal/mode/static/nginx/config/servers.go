@@ -10,6 +10,7 @@ import (
 
 	"github.com/nginxinc/nginx-gateway-fabric/internal/framework/helpers"
 	"github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/nginx/config/http"
+	"github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/nginx/config/policies"
 	"github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/state/dataplane"
 )
 
@@ -57,8 +58,14 @@ var grpcBaseHeaders = []http.Header{
 	},
 }
 
-func executeServers(conf dataplane.Configuration) []executeResult {
-	servers, httpMatchPairs := createServers(conf.HTTPServers, conf.SSLServers)
+func newExecuteServersFunc(generator policies.Generator) executeFunc {
+	return func(configuration dataplane.Configuration) []executeResult {
+		return executeServers(configuration, generator)
+	}
+}
+
+func executeServers(conf dataplane.Configuration, generator policies.Generator) []executeResult {
+	servers, httpMatchPairs := createServers(conf.HTTPServers, conf.SSLServers, generator)
 
 	serverResult := executeResult{
 		dest: httpConfigFile,
@@ -77,43 +84,33 @@ func executeServers(conf dataplane.Configuration) []executeResult {
 		data: httpMatchConf,
 	}
 
-	additionFileResults := createAdditionFileResults(conf)
+	includeFileResults := createIncludeFileResults(servers)
 
-	allResults := make([]executeResult, 0, len(additionFileResults)+2)
-	allResults = append(allResults, additionFileResults...)
+	allResults := make([]executeResult, 0, len(includeFileResults)+2)
+	allResults = append(allResults, includeFileResults...)
 	allResults = append(allResults, serverResult, httpMatchResult)
 
 	return allResults
 }
 
-func createAdditionFileResults(conf dataplane.Configuration) []executeResult {
-	uniqueAdditions := make(map[string][]byte)
+func createIncludeFileResults(servers []http.Server) []executeResult {
+	uniqueIncludes := make(map[string][]byte)
 
-	findUniqueAdditionsForServer := func(server dataplane.VirtualServer) {
-		for _, add := range server.Additions {
-			uniqueAdditions[createAdditionFileName(add)] = add.Bytes
+	for _, server := range servers {
+		for _, include := range server.Includes {
+			uniqueIncludes[include.Name] = include.Content
 		}
 
-		for _, pr := range server.PathRules {
-			for _, mr := range pr.MatchRules {
-				for _, add := range mr.Additions {
-					uniqueAdditions[createAdditionFileName(add)] = add.Bytes
-				}
+		for _, loc := range server.Locations {
+			for _, include := range loc.Includes {
+				uniqueIncludes[include.Name] = include.Content
 			}
 		}
 	}
 
-	for _, s := range conf.HTTPServers {
-		findUniqueAdditionsForServer(s)
-	}
+	results := make([]executeResult, 0, len(uniqueIncludes))
 
-	for _, s := range conf.SSLServers {
-		findUniqueAdditionsForServer(s)
-	}
-
-	results := make([]executeResult, 0, len(uniqueAdditions))
-
-	for filename, contents := range uniqueAdditions {
+	for filename, contents := range uniqueIncludes {
 		results = append(results, executeResult{
 			dest: filename,
 			data: contents,
@@ -123,36 +120,21 @@ func createAdditionFileResults(conf dataplane.Configuration) []executeResult {
 	return results
 }
 
-func createAdditionFileName(addition dataplane.Addition) string {
-	return fmt.Sprintf("%s/%s.conf", includesFolder, addition.Identifier)
-}
-
-func createIncludes(additions []dataplane.Addition) []string {
-	if len(additions) == 0 {
-		return nil
-	}
-
-	includes := make([]string, 0, len(additions))
-
-	for _, addition := range additions {
-		includes = append(includes, createAdditionFileName(addition))
-	}
-
-	return includes
-}
-
-func createServers(httpServers, sslServers []dataplane.VirtualServer) ([]http.Server, httpMatchPairs) {
+func createServers(
+	httpServers, sslServers []dataplane.VirtualServer,
+	generator policies.Generator,
+) ([]http.Server, httpMatchPairs) {
 	servers := make([]http.Server, 0, len(httpServers)+len(sslServers))
 	finalMatchPairs := make(httpMatchPairs)
 
 	for serverID, s := range httpServers {
-		httpServer, matchPairs := createServer(s, serverID)
+		httpServer, matchPairs := createServer(s, serverID, generator)
 		servers = append(servers, httpServer)
 		maps.Copy(finalMatchPairs, matchPairs)
 	}
 
 	for serverID, s := range sslServers {
-		sslServer, matchPair := createSSLServer(s, serverID)
+		sslServer, matchPair := createSSLServer(s, serverID, generator)
 		servers = append(servers, sslServer)
 		maps.Copy(finalMatchPairs, matchPair)
 	}
@@ -160,7 +142,11 @@ func createServers(httpServers, sslServers []dataplane.VirtualServer) ([]http.Se
 	return servers, finalMatchPairs
 }
 
-func createSSLServer(virtualServer dataplane.VirtualServer, serverID int) (http.Server, httpMatchPairs) {
+func createSSLServer(
+	virtualServer dataplane.VirtualServer,
+	serverID int,
+	generator policies.Generator,
+) (http.Server, httpMatchPairs) {
 	if virtualServer.IsDefault {
 		return http.Server{
 			IsDefaultSSL: true,
@@ -168,7 +154,7 @@ func createSSLServer(virtualServer dataplane.VirtualServer, serverID int) (http.
 		}, nil
 	}
 
-	locs, matchPairs, grpc := createLocations(&virtualServer, serverID)
+	locs, matchPairs, grpc := createLocations(&virtualServer, serverID, generator)
 
 	return http.Server{
 		ServerName: virtualServer.Hostname,
@@ -179,11 +165,15 @@ func createSSLServer(virtualServer dataplane.VirtualServer, serverID int) (http.
 		Locations: locs,
 		Port:      virtualServer.Port,
 		GRPC:      grpc,
-		Includes:  createIncludes(virtualServer.Additions),
+		Includes:  buildIncludesFromServerFiles(generator.GenerateForServer(virtualServer)),
 	}, matchPairs
 }
 
-func createServer(virtualServer dataplane.VirtualServer, serverID int) (http.Server, httpMatchPairs) {
+func createServer(
+	virtualServer dataplane.VirtualServer,
+	serverID int,
+	generator policies.Generator,
+) (http.Server, httpMatchPairs) {
 	if virtualServer.IsDefault {
 		return http.Server{
 			IsDefaultHTTP: true,
@@ -191,14 +181,14 @@ func createServer(virtualServer dataplane.VirtualServer, serverID int) (http.Ser
 		}, nil
 	}
 
-	locs, matchPairs, grpc := createLocations(&virtualServer, serverID)
+	locs, matchPairs, grpc := createLocations(&virtualServer, serverID, generator)
 
 	return http.Server{
 		ServerName: virtualServer.Hostname,
 		Locations:  locs,
 		Port:       virtualServer.Port,
 		GRPC:       grpc,
-		Includes:   createIncludes(virtualServer.Additions),
+		Includes:   buildIncludesFromServerFiles(generator.GenerateForServer(virtualServer)),
 	}, matchPairs
 }
 
@@ -213,7 +203,11 @@ type rewriteConfig struct {
 
 type httpMatchPairs map[string][]routeMatch
 
-func createLocations(server *dataplane.VirtualServer, serverID int) ([]http.Location, httpMatchPairs, bool) {
+func createLocations(
+	server *dataplane.VirtualServer,
+	serverID int,
+	generator policies.Generator,
+) ([]http.Location, httpMatchPairs, bool) {
 	maxLocs, pathsAndTypes := getMaxLocationCountAndPathMap(server.PathRules)
 	locs := make([]http.Location, 0, maxLocs)
 	matchPairs := make(httpMatchPairs)
@@ -221,6 +215,7 @@ func createLocations(server *dataplane.VirtualServer, serverID int) ([]http.Loca
 	var grpc bool
 
 	for pathRuleIdx, rule := range server.PathRules {
+
 		matches := make([]routeMatch, 0, len(rule.MatchRules))
 
 		if rule.Path == rootPath {
@@ -236,22 +231,29 @@ func createLocations(server *dataplane.VirtualServer, serverID int) ([]http.Loca
 		for matchRuleIdx, r := range rule.MatchRules {
 			buildLocations := extLocations
 
+			result := generator.GenerateForMatchRule(r)
+
 			if len(rule.MatchRules) != 1 || !isPathOnlyMatch(r.Match) {
 				intLocation, match := initializeInternalLocation(pathRuleIdx, matchRuleIdx, r.Match, grpc)
+				intLocation.Includes = buildIncludesFromLocationFiles(result.ForInternalLocation())
+
 				buildLocations = []http.Location{intLocation}
 				matches = append(matches, match)
+			} else {
+				for i := range buildLocations {
+					buildLocations[i].Includes = buildIncludesFromLocationFiles(result.ForExternalLocation())
+				}
 			}
-
-			includes := createIncludes(r.Additions)
 
 			// buildLocations will either contain the extLocations OR the intLocation.
 			// If it contains the intLocation, the extLocations will be added to the final locations after we loop
 			// through all the MatchRules.
-			// It is safe to modify the buildLocations here by adding includes and filters.
-			buildLocations = updateLocationsForIncludes(buildLocations, includes)
+			// It is safe to modify the buildLocations here by adding filters.
 			buildLocations = updateLocationsForFilters(r.Filters, buildLocations, r, server.Port, rule.Path, rule.GRPC)
 			locs = append(locs, buildLocations...)
 		}
+
+		pathRuleResult := generator.GenerateForPathRule(rule)
 
 		if len(matches) > 0 {
 			for i := range extLocations {
@@ -265,6 +267,7 @@ func createLocations(server *dataplane.VirtualServer, serverID int) ([]http.Loca
 				key += strconv.Itoa(serverID) + "_" + strconv.Itoa(pathRuleIdx)
 				extLocations[i].HTTPMatchKey = key
 				matchPairs[extLocations[i].HTTPMatchKey] = matches
+				extLocations[i].Includes = buildIncludesFromLocationFiles(pathRuleResult.ForExternalRedirectLocation())
 			}
 			locs = append(locs, extLocations...)
 		}
@@ -277,12 +280,36 @@ func createLocations(server *dataplane.VirtualServer, serverID int) ([]http.Loca
 	return locs, matchPairs, grpc
 }
 
-func updateLocationsForIncludes(locations []http.Location, includes []string) []http.Location {
-	for i := range locations {
-		locations[i].Includes = includes
+func buildIncludesFromServerFiles(files []policies.ServerFile) []http.Include {
+	if len(files) == 0 {
+		return nil
 	}
 
-	return locations
+	includes := make([]http.Include, 0, len(files))
+	for _, file := range files {
+		includes = append(includes, http.Include{
+			Name:    includesFolder + "/" + file.Name,
+			Content: file.Content,
+		})
+	}
+
+	return includes
+}
+
+func buildIncludesFromLocationFiles(files []policies.LocationFile) []http.Include {
+	if len(files) == 0 {
+		return nil
+	}
+
+	includes := make([]http.Include, 0, len(files))
+	for _, file := range files {
+		includes = append(includes, http.Include{
+			Name:    includesFolder + "/" + file.Name,
+			Content: file.Content,
+		})
+	}
+
+	return includes
 }
 
 // pathAndTypeMap contains a map of paths and any path types defined for that path

@@ -2504,7 +2504,7 @@ func TestCreateAdditionFileResults(t *testing.T) {
 		},
 	}
 
-	results := createAdditionFileResults(conf)
+	results := createIncludeFileResults(conf)
 
 	expResults := []executeResult{
 		{

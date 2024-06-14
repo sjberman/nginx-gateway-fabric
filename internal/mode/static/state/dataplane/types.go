@@ -6,6 +6,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
+	"github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/policies"
 	"github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/state/resolver"
 )
 
@@ -68,20 +69,12 @@ type VirtualServer struct {
 	Hostname string
 	// PathRules is a collection of routing rules.
 	PathRules []PathRule
-	// Additions is a list of config additions for the server.
-	Additions []Addition
+	// Policies is a list of Policies that apply to the server.
+	Policies []policies.Policy
 	// Port is the port of the server.
 	Port int32
 	// IsDefault indicates whether the server is the default server.
 	IsDefault bool
-}
-
-// Addition holds additional configuration.
-type Addition struct {
-	// Identifier is a unique identifier for the addition.
-	Identifier string
-	// Bytes contains the additional configuration.
-	Bytes []byte
 }
 
 // Upstream is a pool of endpoints to be load balanced.
@@ -214,8 +207,8 @@ type MatchRule struct {
 	Source *metav1.ObjectMeta
 	// Match holds the match for the rule.
 	Match Match
-	// Additions holds the config additions for the rule.
-	Additions []Addition
+	// Policies is a list of Policies that apply to the rule.
+	Policies []policies.Policy
 	// BackendGroup is the group of Backends that the rule routes to.
 	BackendGroup BackendGroup
 }

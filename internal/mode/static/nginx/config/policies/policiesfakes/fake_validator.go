@@ -5,15 +5,15 @@ import (
 	"sync"
 
 	"github.com/nginxinc/nginx-gateway-fabric/internal/framework/conditions"
-	"github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/policies"
+	policies2 "github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/nginx/config/policies"
 )
 
 type FakeValidator struct {
-	ConflictsStub        func(policies.Policy, policies.Policy) bool
+	ConflictsStub        func(policies2.Policy, policies2.Policy) bool
 	conflictsMutex       sync.RWMutex
 	conflictsArgsForCall []struct {
-		arg1 policies.Policy
-		arg2 policies.Policy
+		arg1 policies2.Policy
+		arg2 policies2.Policy
 	}
 	conflictsReturns struct {
 		result1 bool
@@ -21,11 +21,11 @@ type FakeValidator struct {
 	conflictsReturnsOnCall map[int]struct {
 		result1 bool
 	}
-	ValidateStub        func(policies.Policy, *policies.GlobalSettings) []conditions.Condition
+	ValidateStub        func(policies2.Policy, *policies2.GlobalSettings) []conditions.Condition
 	validateMutex       sync.RWMutex
 	validateArgsForCall []struct {
-		arg1 policies.Policy
-		arg2 *policies.GlobalSettings
+		arg1 policies2.Policy
+		arg2 *policies2.GlobalSettings
 	}
 	validateReturns struct {
 		result1 []conditions.Condition
@@ -37,12 +37,12 @@ type FakeValidator struct {
 	invocationsMutex sync.RWMutex
 }
 
-func (fake *FakeValidator) Conflicts(arg1 policies.Policy, arg2 policies.Policy) bool {
+func (fake *FakeValidator) Conflicts(arg1 policies2.Policy, arg2 policies2.Policy) bool {
 	fake.conflictsMutex.Lock()
 	ret, specificReturn := fake.conflictsReturnsOnCall[len(fake.conflictsArgsForCall)]
 	fake.conflictsArgsForCall = append(fake.conflictsArgsForCall, struct {
-		arg1 policies.Policy
-		arg2 policies.Policy
+		arg1 policies2.Policy
+		arg2 policies2.Policy
 	}{arg1, arg2})
 	stub := fake.ConflictsStub
 	fakeReturns := fake.conflictsReturns
@@ -63,13 +63,13 @@ func (fake *FakeValidator) ConflictsCallCount() int {
 	return len(fake.conflictsArgsForCall)
 }
 
-func (fake *FakeValidator) ConflictsCalls(stub func(policies.Policy, policies.Policy) bool) {
+func (fake *FakeValidator) ConflictsCalls(stub func(policies2.Policy, policies2.Policy) bool) {
 	fake.conflictsMutex.Lock()
 	defer fake.conflictsMutex.Unlock()
 	fake.ConflictsStub = stub
 }
 
-func (fake *FakeValidator) ConflictsArgsForCall(i int) (policies.Policy, policies.Policy) {
+func (fake *FakeValidator) ConflictsArgsForCall(i int) (policies2.Policy, policies2.Policy) {
 	fake.conflictsMutex.RLock()
 	defer fake.conflictsMutex.RUnlock()
 	argsForCall := fake.conflictsArgsForCall[i]
@@ -99,12 +99,12 @@ func (fake *FakeValidator) ConflictsReturnsOnCall(i int, result1 bool) {
 	}{result1}
 }
 
-func (fake *FakeValidator) Validate(arg1 policies.Policy, arg2 *policies.GlobalSettings) []conditions.Condition {
+func (fake *FakeValidator) Validate(arg1 policies2.Policy, arg2 *policies2.GlobalSettings) []conditions.Condition {
 	fake.validateMutex.Lock()
 	ret, specificReturn := fake.validateReturnsOnCall[len(fake.validateArgsForCall)]
 	fake.validateArgsForCall = append(fake.validateArgsForCall, struct {
-		arg1 policies.Policy
-		arg2 *policies.GlobalSettings
+		arg1 policies2.Policy
+		arg2 *policies2.GlobalSettings
 	}{arg1, arg2})
 	stub := fake.ValidateStub
 	fakeReturns := fake.validateReturns
@@ -125,13 +125,13 @@ func (fake *FakeValidator) ValidateCallCount() int {
 	return len(fake.validateArgsForCall)
 }
 
-func (fake *FakeValidator) ValidateCalls(stub func(policies.Policy, *policies.GlobalSettings) []conditions.Condition) {
+func (fake *FakeValidator) ValidateCalls(stub func(policies2.Policy, *policies2.GlobalSettings) []conditions.Condition) {
 	fake.validateMutex.Lock()
 	defer fake.validateMutex.Unlock()
 	fake.ValidateStub = stub
 }
 
-func (fake *FakeValidator) ValidateArgsForCall(i int) (policies.Policy, *policies.GlobalSettings) {
+func (fake *FakeValidator) ValidateArgsForCall(i int) (policies2.Policy, *policies2.GlobalSettings) {
 	fake.validateMutex.RLock()
 	defer fake.validateMutex.RUnlock()
 	argsForCall := fake.validateArgsForCall[i]
@@ -187,4 +187,4 @@ func (fake *FakeValidator) recordInvocation(key string, args []interface{}) {
 	fake.invocations[key] = append(fake.invocations[key], args)
 }
 
-var _ policies.Validator = new(FakeValidator)
+var _ policies2.Validator = new(FakeValidator)

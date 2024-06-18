@@ -38,7 +38,7 @@ server {
 
         {{ range $l := $s.Locations }}
     location {{ $l.Path }} {
-        {{ if $l.Internal -}}
+        {{ if eq $l.Type "internal" -}}
         internal;
         {{ end }}
 
@@ -54,7 +54,7 @@ server {
         return {{ $l.Return.Code }} "{{ $l.Return.Body }}";
         {{- end }}
 
-        {{- if $l.HTTPMatchKey }}
+        {{- if eq $l.Type "redirect" }}
         set $match_key {{ $l.HTTPMatchKey }};
         js_content httpmatches.redirect;
         {{- end }}

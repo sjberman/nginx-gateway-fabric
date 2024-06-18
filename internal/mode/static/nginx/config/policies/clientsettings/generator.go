@@ -3,13 +3,12 @@ package clientsettings
 import (
 	"fmt"
 	"strconv"
-	"strings"
 	"text/template"
 
 	ngfAPI "github.com/nginxinc/nginx-gateway-fabric/apis/v1alpha1"
 	"github.com/nginxinc/nginx-gateway-fabric/internal/framework/helpers"
+	"github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/nginx/config/http"
 	"github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/nginx/config/policies"
-	"github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/state/dataplane"
 )
 
 var (
@@ -55,84 +54,90 @@ func NewGenerator() *Generator {
 	return &Generator{}
 }
 
-func (g Generator) GenerateForServer(server dataplane.VirtualServer) policies.GenerateForServerResult {
-	results := make(policies.GenerateForServerResult, 0, len(server.Policies))
+// TODO: do I need the server here?
+func (g Generator) GenerateForServer(pols []policies.Policy, _ http.Server) policies.GenerateResult {
+	files := make([]policies.File, 0, len(pols))
 
-	for _, pol := range server.Policies {
-		switch csp := pol.(type) {
-		case *ngfAPI.ClientSettingsPolicy:
-			results = append(results, policies.ServerFile{
-				Name:    fmt.Sprintf("%s_%s_%s.conf", csp.Kind, csp.Namespace, csp.Name),
-				Content: helpers.MustExecuteTemplate(tmpl, csp.Spec),
-			})
+	for _, pol := range pols {
+		csp, ok := pol.(*ngfAPI.ClientSettingsPolicy)
+		if !ok {
+			continue
 		}
+
+		files = append(files, policies.File{
+			Name:    fmt.Sprintf("ClientSettingsPolicy_%s_%s_server.conf", csp.Namespace, csp.Name),
+			Content: helpers.MustExecuteTemplate(tmpl, csp.Spec),
+		})
 	}
 
-	return results
+	return policies.GenerateResult{Files: files}
 }
 
-func (g Generator) GenerateForPathRule(rule dataplane.PathRule) policies.GenerateForLocationResult {
-	var maxBodySize ngfAPI.Size
+func (g Generator) GenerateForLocation(pols []policies.Policy, location http.Location) policies.GenerateResult {
+	if location.Type == http.ExternalLocationType {
+		files := make([]policies.File, 0, len(pols))
 
-	for _, match := range rule.MatchRules {
-		for _, pol := range match.Policies {
+		for _, pol := range pols {
 			csp, ok := pol.(*ngfAPI.ClientSettingsPolicy)
 			if !ok {
 				continue
 			}
 
-			if csp.Spec.Body != nil {
-				maxBodySize = getMaxSize(maxBodySize, csp.Spec.Body.MaxSize)
-			}
+			files = append(files, policies.File{
+				Name:    fmt.Sprintf("ClientSettingsPolicy_%s_%s_ext.conf", csp.Namespace, csp.Name),
+				Content: helpers.MustExecuteTemplate(tmpl, csp.Spec),
+			})
+		}
+
+		return policies.GenerateResult{Files: files}
+	}
+
+	var maxBodySize ngfAPI.Size
+
+	for _, pol := range pols {
+		csp, ok := pol.(*ngfAPI.ClientSettingsPolicy)
+		if !ok {
+			continue
+		}
+
+		if csp.Spec.Body != nil {
+			maxBodySize = getMaxSize(maxBodySize, csp.Spec.Body.MaxSize)
 		}
 	}
 
 	if maxBodySize == "" {
-		return nil
+		return policies.GenerateResult{}
 	}
 
-	return policies.GenerateForLocationResult{
-		{
-			Name: fmt.Sprintf(
-				"ClientSettingsPolicy_%s_%s_redirect.conf",
-				rule.PathType,
-				removeSlashFromPath(rule.Path),
-			),
-			Type:    policies.ExternalRedirect,
-			Content: helpers.MustExecuteTemplate(tmplExternalRedirect, maxBodySize),
+	return policies.GenerateResult{
+		Files: []policies.File{
+			{
+				Name:    fmt.Sprintf("ClientSettingsPolicy_%s_redirect.conf", location.HTTPMatchKey),
+				Content: helpers.MustExecuteTemplate(tmplExternalRedirect, maxBodySize),
+			},
 		},
 	}
 }
 
-func removeSlashFromPath(path string) string {
-	return strings.ReplaceAll(path, "/", "")
-}
+func (g Generator) GenerateForInternalLocation(
+	pols []policies.Policy,
+	_ http.Location,
+) policies.GenerateResult {
+	files := make([]policies.File, 0, len(pols))
 
-func (g Generator) GenerateForMatchRule(rule dataplane.MatchRule) policies.GenerateForLocationResult {
-	results := make(policies.GenerateForLocationResult, 0, len(rule.Policies)*2)
-
-	for _, pol := range rule.Policies {
-		switch csp := pol.(type) {
-		case *ngfAPI.ClientSettingsPolicy:
-			fileContents := helpers.MustExecuteTemplate(tmpl, csp.Spec)
-
-			results = append(
-				results,
-				policies.LocationFile{
-					Name:    fmt.Sprintf("%s_%s_%s_int.conf", csp.Kind, csp.Namespace, csp.Name),
-					Content: fileContents,
-					Type:    policies.Internal,
-				},
-				policies.LocationFile{
-					Name:    fmt.Sprintf("%s_%s_%s_ext.conf", csp.Kind, csp.Namespace, csp.Name),
-					Content: fileContents,
-					Type:    policies.External,
-				},
-			)
+	for _, pol := range pols {
+		csp, ok := pol.(*ngfAPI.ClientSettingsPolicy)
+		if !ok {
+			continue
 		}
+
+		files = append(files, policies.File{
+			Name:    fmt.Sprintf("ClientSettingsPolicy_%s_%s_int.conf", csp.Namespace, csp.Name),
+			Content: helpers.MustExecuteTemplate(tmpl, csp.Spec),
+		})
 	}
 
-	return results
+	return policies.GenerateResult{Files: files}
 }
 
 func isDigit(char string) bool {

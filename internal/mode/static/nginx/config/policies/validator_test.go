@@ -7,21 +7,21 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/nginxinc/nginx-gateway-fabric/internal/framework/conditions"
-	"github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/policies"
-	"github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/policies/policiesfakes"
+	policies2 "github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/nginx/config/policies"
+	policiesfakes2 "github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/nginx/config/policies/policiesfakes"
 	staticConds "github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/state/conditions"
 )
 
-var _ = Describe("Policy Manager", func() {
+var _ = Describe("Policy CompositeValidator", func() {
 	orangeGVK := schema.GroupVersionKind{Group: "fruit", Version: "1", Kind: "orange"}
-	orangePolicy := &policiesfakes.FakePolicy{
+	orangePolicy := &policiesfakes2.FakePolicy{
 		GetNameStub: func() string {
 			return "orange"
 		},
 	}
 
 	appleGVK := schema.GroupVersionKind{Group: "fruit", Version: "1", Kind: "apple"}
-	applePolicy := &policiesfakes.FakePolicy{
+	applePolicy := &policiesfakes2.FakePolicy{
 		GetNameStub: func() string {
 			return "apple"
 		},
@@ -38,28 +38,28 @@ var _ = Describe("Policy Manager", func() {
 		}
 	}
 
-	mgr := policies.NewManager(
+	mgr := policies2.NewManager(
 		mustExtractGVK,
-		policies.ManagerConfig{
-			Validator: &policiesfakes.FakeValidator{
-				ValidateStub: func(_ policies.Policy, _ *policies.GlobalSettings) []conditions.Condition {
+		policies2.ManagerConfig{
+			Validator: &policiesfakes2.FakeValidator{
+				ValidateStub: func(_ policies2.Policy, _ *policies2.GlobalSettings) []conditions.Condition {
 					return []conditions.Condition{staticConds.NewPolicyInvalid("apple error")}
 				},
-				ConflictsStub: func(_ policies.Policy, _ policies.Policy) bool { return true },
+				ConflictsStub: func(_ policies2.Policy, _ policies2.Policy) bool { return true },
 			},
-			Generator: func(_ policies.Policy, _ *policies.GlobalSettings) []byte {
+			Generator: func(_ policies2.Policy, _ *policies2.GlobalSettings) []byte {
 				return []byte("apple")
 			},
 			GVK: appleGVK,
 		},
-		policies.ManagerConfig{
-			Validator: &policiesfakes.FakeValidator{
-				ValidateStub: func(_ policies.Policy, _ *policies.GlobalSettings) []conditions.Condition {
+		policies2.ManagerConfig{
+			Validator: &policiesfakes2.FakeValidator{
+				ValidateStub: func(_ policies2.Policy, _ *policies2.GlobalSettings) []conditions.Condition {
 					return []conditions.Condition{staticConds.NewPolicyInvalid("orange error")}
 				},
-				ConflictsStub: func(_ policies.Policy, _ policies.Policy) bool { return false },
+				ConflictsStub: func(_ policies2.Policy, _ policies2.Policy) bool { return false },
 			},
-			Generator: func(_ policies.Policy, _ *policies.GlobalSettings) []byte {
+			Generator: func(_ policies2.Policy, _ *policies2.GlobalSettings) []byte {
 				return []byte("orange")
 			},
 			GVK: orangeGVK,
@@ -85,14 +85,14 @@ var _ = Describe("Policy Manager", func() {
 		When("Policy is not registered with manager", func() {
 			It("Panics on call to validate", func() {
 				validate := func() {
-					_ = mgr.Validate(&policiesfakes.FakePolicy{}, nil)
+					_ = mgr.Validate(&policiesfakes2.FakePolicy{}, nil)
 				}
 
 				Expect(validate).To(Panic())
 			})
 			It("panics on call to conflicts", func() {
 				conflict := func() {
-					_ = mgr.Conflicts(&policiesfakes.FakePolicy{}, &policiesfakes.FakePolicy{})
+					_ = mgr.Conflicts(&policiesfakes2.FakePolicy{}, &policiesfakes2.FakePolicy{})
 				}
 
 				Expect(conflict).To(Panic())
@@ -109,7 +109,7 @@ var _ = Describe("Policy Manager", func() {
 		When("Policy is not registered with manager", func() {
 			It("Panics on generate", func() {
 				generate := func() {
-					_ = mgr.Generate(&policiesfakes.FakePolicy{}, nil)
+					_ = mgr.Generate(&policiesfakes2.FakePolicy{}, nil)
 				}
 
 				Expect(generate).To(Panic())

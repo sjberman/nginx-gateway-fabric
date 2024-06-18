@@ -1,69 +1,26 @@
 package policies
 
 import (
-	"github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/state/dataplane"
+	"maps"
+
+	"github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/nginx/config/http"
 )
 
 type Generator interface {
-	GenerateForServer(server dataplane.VirtualServer) GenerateForServerResult
-	GenerateForPathRule(rule dataplane.PathRule) GenerateForLocationResult
-	GenerateForMatchRule(rule dataplane.MatchRule) GenerateForLocationResult
+	GenerateForLocation(policies []Policy, location http.Location) GenerateResult
+	// TODO: do we need this as a separate method?
+	GenerateForInternalLocation(policies []Policy, internalLocation http.Location) GenerateResult
+	GenerateForServer(policies []Policy, server http.Server) GenerateResult
 }
 
-type GenerateForServerResult []ServerFile
+type GenerateResult struct {
+	KeyVals map[string]interface{}
+	Files   []File
+}
 
-type ServerFile struct {
+type File struct {
 	Name    string
 	Content []byte
-}
-
-type GenerateForLocationResult []LocationFile
-
-type LocationFile struct {
-	Name    string
-	Type    LocationType
-	Content []byte
-}
-
-type LocationType int
-
-const (
-	Internal LocationType = iota
-	External
-	ExternalRedirect
-)
-
-func (locFile GenerateForLocationResult) ForInternalLocation() []LocationFile {
-	files := make([]LocationFile, 0, len(locFile))
-	for _, f := range locFile {
-		if f.Type == Internal {
-			files = append(files, f)
-		}
-	}
-
-	return files
-}
-
-func (locFile GenerateForLocationResult) ForExternalLocation() []LocationFile {
-	files := make([]LocationFile, 0, len(locFile))
-	for _, f := range locFile {
-		if f.Type == External {
-			files = append(files, f)
-		}
-	}
-
-	return files
-}
-
-func (locFile GenerateForLocationResult) ForExternalRedirectLocation() []LocationFile {
-	files := make([]LocationFile, 0, len(locFile))
-	for _, f := range locFile {
-		if f.Type == ExternalRedirect {
-			files = append(files, f)
-		}
-	}
-
-	return files
 }
 
 type CompositeGenerator struct {
@@ -74,32 +31,41 @@ func NewCompositeGenerator(generators ...Generator) *CompositeGenerator {
 	return &CompositeGenerator{generators: generators}
 }
 
-func (g *CompositeGenerator) GenerateForServer(server dataplane.VirtualServer) GenerateForServerResult {
-	var results GenerateForServerResult
+func (g *CompositeGenerator) GenerateForInternalLocation(
+	policies []Policy,
+	internalLocation http.Location,
+) GenerateResult {
+	var compositeResult GenerateResult
 
 	for _, generator := range g.generators {
-		results = append(results, generator.GenerateForServer(server)...)
+		result := generator.GenerateForInternalLocation(policies, internalLocation)
+		compositeResult.Files = append(compositeResult.Files, result.Files...)
+		maps.Copy(compositeResult.KeyVals, result.KeyVals)
 	}
 
-	return results
+	return compositeResult
 }
 
-func (g *CompositeGenerator) GenerateForPathRule(rule dataplane.PathRule) GenerateForLocationResult {
-	var results GenerateForLocationResult
+func (g *CompositeGenerator) GenerateForServer(policies []Policy, server http.Server) GenerateResult {
+	var compositeResult GenerateResult
 
 	for _, generator := range g.generators {
-		results = append(results, generator.GenerateForPathRule(rule)...)
+		result := generator.GenerateForServer(policies, server)
+		compositeResult.Files = append(compositeResult.Files, result.Files...)
+		maps.Copy(compositeResult.KeyVals, result.KeyVals)
 	}
 
-	return results
+	return compositeResult
 }
 
-func (g *CompositeGenerator) GenerateForMatchRule(rule dataplane.MatchRule) GenerateForLocationResult {
-	var results GenerateForLocationResult
+func (g *CompositeGenerator) GenerateForLocation(policies []Policy, location http.Location) GenerateResult {
+	var compositeResult GenerateResult
 
 	for _, generator := range g.generators {
-		results = append(results, generator.GenerateForMatchRule(rule)...)
+		result := generator.GenerateForLocation(policies, location)
+		compositeResult.Files = append(compositeResult.Files, result.Files...)
+		maps.Copy(compositeResult.KeyVals, result.KeyVals)
 	}
 
-	return results
+	return compositeResult
 }

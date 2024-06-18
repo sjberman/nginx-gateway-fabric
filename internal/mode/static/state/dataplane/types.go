@@ -6,7 +6,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
-	"github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/policies"
+	"github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/nginx/config/policies"
 	"github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/state/resolver"
 )
 
@@ -103,6 +103,8 @@ type PathRule struct {
 	MatchRules []MatchRule
 	// GRPC indicates if this is a gRPC rule
 	GRPC bool
+	// Policies contains the list of policies that are applied to the MatchRules for this PathRule.
+	Policies []policies.Policy
 }
 
 // InvalidHTTPFilter is a special filter for handling the case when configured filters are invalid.

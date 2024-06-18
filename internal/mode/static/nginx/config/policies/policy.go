@@ -23,13 +23,6 @@ type Policy interface {
 	client.Object
 }
 
-// ConfigGenerator generates a slice of bytes containing the configuration from a Policy.
-//
-//counterfeiter:generate . ConfigGenerator
-type ConfigGenerator interface {
-	Generate(policy Policy, globalSettings *GlobalSettings) []byte
-}
-
 // GlobalSettings contains global settings from the current state of the graph that may be
 // needed for policy validation or generation if certain policies rely on those global settings.
 type GlobalSettings struct {

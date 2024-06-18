@@ -14,8 +14,8 @@ import (
 	"github.com/nginxinc/nginx-gateway-fabric/internal/framework/conditions"
 	"github.com/nginxinc/nginx-gateway-fabric/internal/framework/helpers"
 	"github.com/nginxinc/nginx-gateway-fabric/internal/framework/kinds"
-	"github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/policies"
-	"github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/policies/policiesfakes"
+	"github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/nginx/config/policies"
+	policiesfakes2 "github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/nginx/config/policies/policiesfakes"
 	staticConds "github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/state/conditions"
 	"github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/state/validation"
 )
@@ -28,7 +28,7 @@ func TestAttachPolicies(t *testing.T) {
 	gwPolicyKey := createTestPolicyKey(policyGVK, "gw-policy")
 	gwPolicy := &Policy{
 		Valid:  true,
-		Source: &policiesfakes.FakePolicy{},
+		Source: &policiesfakes2.FakePolicy{},
 		TargetRefs: []PolicyTargetRef{
 			{
 				Kind:   kinds.Gateway,
@@ -46,7 +46,7 @@ func TestAttachPolicies(t *testing.T) {
 	routePolicyKey := createTestPolicyKey(policyGVK, "route-policy")
 	routePolicy := &Policy{
 		Valid:  true,
-		Source: &policiesfakes.FakePolicy{},
+		Source: &policiesfakes2.FakePolicy{},
 		TargetRefs: []PolicyTargetRef{
 			{
 				Kind:   kinds.HTTPRoute,
@@ -64,7 +64,7 @@ func TestAttachPolicies(t *testing.T) {
 	grpcRoutePolicyKey := createTestPolicyKey(policyGVK, "grpc-route-policy")
 	grpcRoutePolicy := &Policy{
 		Valid:  true,
-		Source: &policiesfakes.FakePolicy{},
+		Source: &policiesfakes2.FakePolicy{},
 		TargetRefs: []PolicyTargetRef{
 			{
 				Kind:   kinds.GRPCRoute,
@@ -284,7 +284,7 @@ func TestAttachPolicyToRoute(t *testing.T) {
 		{
 			name:   "policy attaches to http route",
 			route:  createHTTPRoute(true /*valid*/, true /*attachable*/, true /*parentRefs*/),
-			policy: &Policy{Source: &policiesfakes.FakePolicy{}},
+			policy: &Policy{Source: &policiesfakes2.FakePolicy{}},
 			expAncestors: []PolicyAncestor{
 				{Ancestor: createExpAncestor(kinds.HTTPRoute)},
 			},
@@ -293,7 +293,7 @@ func TestAttachPolicyToRoute(t *testing.T) {
 		{
 			name:   "policy attaches to grpc route",
 			route:  createGRPCRoute(true /*valid*/, true /*attachable*/, true /*parentRefs*/),
-			policy: &Policy{Source: &policiesfakes.FakePolicy{}},
+			policy: &Policy{Source: &policiesfakes2.FakePolicy{}},
 			expAncestors: []PolicyAncestor{
 				{Ancestor: createExpAncestor(kinds.GRPCRoute)},
 			},
@@ -303,7 +303,7 @@ func TestAttachPolicyToRoute(t *testing.T) {
 			name:  "attachment with existing ancestor",
 			route: createHTTPRoute(true /*valid*/, true /*attachable*/, true /*parentRefs*/),
 			policy: &Policy{
-				Source: &policiesfakes.FakePolicy{},
+				Source: &policiesfakes2.FakePolicy{},
 				Ancestors: []PolicyAncestor{
 					{Ancestor: createExpAncestor(kinds.HTTPRoute)},
 				},
@@ -317,7 +317,7 @@ func TestAttachPolicyToRoute(t *testing.T) {
 		{
 			name:   "no attachment; unattachable route",
 			route:  createHTTPRoute(true /*valid*/, false /*attachable*/, true /*parentRefs*/),
-			policy: &Policy{Source: &policiesfakes.FakePolicy{}},
+			policy: &Policy{Source: &policiesfakes2.FakePolicy{}},
 			expAncestors: []PolicyAncestor{
 				{
 					Ancestor:   createExpAncestor(kinds.HTTPRoute),
@@ -329,7 +329,7 @@ func TestAttachPolicyToRoute(t *testing.T) {
 		{
 			name:   "no attachment; missing parentRefs",
 			route:  createHTTPRoute(true /*valid*/, true /*attachable*/, false /*parentRefs*/),
-			policy: &Policy{Source: &policiesfakes.FakePolicy{}},
+			policy: &Policy{Source: &policiesfakes2.FakePolicy{}},
 			expAncestors: []PolicyAncestor{
 				{
 					Ancestor:   createExpAncestor(kinds.HTTPRoute),
@@ -341,7 +341,7 @@ func TestAttachPolicyToRoute(t *testing.T) {
 		{
 			name:   "no attachment; invalid route",
 			route:  createHTTPRoute(false /*valid*/, true /*attachable*/, true /*parentRefs*/),
-			policy: &Policy{Source: &policiesfakes.FakePolicy{}},
+			policy: &Policy{Source: &policiesfakes2.FakePolicy{}},
 			expAncestors: []PolicyAncestor{
 				{
 					Ancestor:   createExpAncestor(kinds.HTTPRoute),
@@ -412,7 +412,7 @@ func TestAttachPolicyToGateway(t *testing.T) {
 		{
 			name: "attached",
 			policy: &Policy{
-				Source: &policiesfakes.FakePolicy{},
+				Source: &policiesfakes2.FakePolicy{},
 				TargetRefs: []PolicyTargetRef{
 					{
 						Nsname: gatewayNsName,
@@ -429,7 +429,7 @@ func TestAttachPolicyToGateway(t *testing.T) {
 		{
 			name: "attached with existing ancestor",
 			policy: &Policy{
-				Source: &policiesfakes.FakePolicy{},
+				Source: &policiesfakes2.FakePolicy{},
 				TargetRefs: []PolicyTargetRef{
 					{
 						Nsname: gatewayNsName,
@@ -450,7 +450,7 @@ func TestAttachPolicyToGateway(t *testing.T) {
 		{
 			name: "not attached; gateway ignored",
 			policy: &Policy{
-				Source: &policiesfakes.FakePolicy{},
+				Source: &policiesfakes2.FakePolicy{},
 				TargetRefs: []PolicyTargetRef{
 					{
 						Nsname: ignoredGatewayNsName,
@@ -470,7 +470,7 @@ func TestAttachPolicyToGateway(t *testing.T) {
 		{
 			name: "not attached; invalid gateway",
 			policy: &Policy{
-				Source: &policiesfakes.FakePolicy{},
+				Source: &policiesfakes2.FakePolicy{},
 				TargetRefs: []PolicyTargetRef{
 					{
 						Nsname: gatewayNsName,
@@ -490,7 +490,7 @@ func TestAttachPolicyToGateway(t *testing.T) {
 		{
 			name: "not attached; non-NGF gateway",
 			policy: &Policy{
-				Source: &policiesfakes.FakePolicy{},
+				Source: &policiesfakes2.FakePolicy{},
 				TargetRefs: []PolicyTargetRef{
 					{
 						Nsname: gateway2NsName,
@@ -568,7 +568,7 @@ func TestProcessPolicies(t *testing.T) {
 
 	pol1Conflict, pol1ConflictKey := createTestPolicyAndKey(policyGVK, hrRef, "pol1-conflict")
 
-	allValidValidator := &policiesfakes.FakeValidator{}
+	allValidValidator := &policiesfakes2.FakeValidator{}
 
 	tests := []struct {
 		validator            validation.PolicyValidator
@@ -646,7 +646,7 @@ func TestProcessPolicies(t *testing.T) {
 		},
 		{
 			name: "invalid and valid policies",
-			validator: &policiesfakes.FakeValidator{
+			validator: &policiesfakes2.FakeValidator{
 				ValidateStub: func(
 					policy policies.Policy,
 					_ *policies.GlobalSettings,
@@ -694,7 +694,7 @@ func TestProcessPolicies(t *testing.T) {
 		},
 		{
 			name: "conflicted policies",
-			validator: &policiesfakes.FakeValidator{
+			validator: &policiesfakes2.FakeValidator{
 				ConflictsStub: func(_ policies.Policy, _ policies.Policy) bool {
 					return true
 				},
@@ -788,7 +788,7 @@ func TestMarkConflictedPolicies(t *testing.T) {
 	tests := []struct {
 		name                  string
 		policies              map[PolicyKey]*Policy
-		fakeValidator         *policiesfakes.FakeValidator
+		fakeValidator         *policiesfakes2.FakeValidator
 		conflictedNames       []string
 		expConflictToBeCalled bool
 	}{
@@ -806,7 +806,7 @@ func TestMarkConflictedPolicies(t *testing.T) {
 					Valid:      true,
 				},
 			},
-			fakeValidator:         &policiesfakes.FakeValidator{},
+			fakeValidator:         &policiesfakes2.FakeValidator{},
 			expConflictToBeCalled: false,
 		},
 		{
@@ -823,7 +823,7 @@ func TestMarkConflictedPolicies(t *testing.T) {
 					Valid:      true,
 				},
 			},
-			fakeValidator:         &policiesfakes.FakeValidator{},
+			fakeValidator:         &policiesfakes2.FakeValidator{},
 			expConflictToBeCalled: false,
 		},
 		{
@@ -840,7 +840,7 @@ func TestMarkConflictedPolicies(t *testing.T) {
 					Valid:      false,
 				},
 			},
-			fakeValidator:         &policiesfakes.FakeValidator{},
+			fakeValidator:         &policiesfakes2.FakeValidator{},
 			expConflictToBeCalled: false,
 		},
 		{
@@ -873,7 +873,7 @@ func TestMarkConflictedPolicies(t *testing.T) {
 					Valid:      true,
 				},
 			},
-			fakeValidator: &policiesfakes.FakeValidator{
+			fakeValidator: &policiesfakes2.FakeValidator{
 				ConflictsStub: func(policy policies.Policy, policy2 policies.Policy) bool {
 					pol1Name := policy.GetName()
 					pol2Name := policy2.GetName()
@@ -921,7 +921,7 @@ func TestMarkConflictedPolicies(t *testing.T) {
 }
 
 func createTestPolicyWithAncestors(numAncestors int) policies.Policy {
-	policy := &policiesfakes.FakePolicy{}
+	policy := &policiesfakes2.FakePolicy{}
 
 	ancestors := make([]v1alpha2.PolicyAncestorStatus, numAncestors)
 
@@ -949,7 +949,7 @@ func createTestPolicy(
 	ref v1alpha2.LocalPolicyTargetReference,
 	name string,
 ) policies.Policy {
-	return &policiesfakes.FakePolicy{
+	return &policiesfakes2.FakePolicy{
 		GetNameStub: func() string {
 			return name
 		},
@@ -960,7 +960,7 @@ func createTestPolicy(
 			return []v1alpha2.LocalPolicyTargetReference{ref}
 		},
 		GetObjectKindStub: func() schema.ObjectKind {
-			return &policiesfakes.FakeObjectKind{
+			return &policiesfakes2.FakeObjectKind{
 				GroupVersionKindStub: func() schema.GroupVersionKind {
 					return gvk
 				},

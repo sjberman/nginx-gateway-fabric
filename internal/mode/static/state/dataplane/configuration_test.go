@@ -19,21 +19,21 @@ import (
 
 	ngfAPI "github.com/nginxinc/nginx-gateway-fabric/apis/v1alpha1"
 	"github.com/nginxinc/nginx-gateway-fabric/internal/framework/helpers"
-	"github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/policies"
-	"github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/policies/policiesfakes"
+	"github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/nginx/config/policies"
+	policiesfakes2 "github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/nginx/config/policies/policiesfakes"
 	"github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/state/graph"
 	"github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/state/resolver"
 	"github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/state/resolver/resolverfakes"
 )
 
 func createFakePolicy(name string, kind string) policies.Policy {
-	fakeKind := &policiesfakes.FakeObjectKind{
+	fakeKind := &policiesfakes2.FakeObjectKind{
 		GroupVersionKindStub: func() schema.GroupVersionKind {
 			return schema.GroupVersionKind{Kind: kind}
 		},
 	}
 
-	return &policiesfakes.FakePolicy{
+	return &policiesfakes2.FakePolicy{
 		GetNameStub: func() string {
 			return name
 		},
@@ -2301,7 +2301,7 @@ func TestBuildConfiguration(t *testing.T) {
 		t.Run(test.msg, func(t *testing.T) {
 			g := NewWithT(t)
 
-			fakeGenerator := &policiesfakes.FakeConfigGenerator{
+			fakeGenerator := &policiesfakes2.FakeConfigGenerator{
 				GenerateStub: func(p policies.Policy, _ *policies.GlobalSettings) []byte {
 					switch kind := p.GetObjectKind().GroupVersionKind().Kind; kind {
 					case "ApplePolicy":
@@ -3254,7 +3254,7 @@ func TestBuildTelemetry(t *testing.T) {
 
 func TestBuildAdditions(t *testing.T) {
 	getPolicy := func(kind, name string) policies.Policy {
-		return &policiesfakes.FakePolicy{
+		return &policiesfakes2.FakePolicy{
 			GetNameStub: func() string {
 				return name
 			},
@@ -3262,7 +3262,7 @@ func TestBuildAdditions(t *testing.T) {
 				return "test"
 			},
 			GetObjectKindStub: func() schema.ObjectKind {
-				objKind := &policiesfakes.FakeObjectKind{
+				objKind := &policiesfakes2.FakeObjectKind{
 					GroupVersionKindStub: func() schema.GroupVersionKind {
 						return schema.GroupVersionKind{Kind: kind}
 					},
@@ -3328,7 +3328,7 @@ func TestBuildAdditions(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			g := NewWithT(t)
 
-			generator := &policiesfakes.FakeConfigGenerator{
+			generator := &policiesfakes2.FakeConfigGenerator{
 				GenerateStub: func(policy policies.Policy, _ *policies.GlobalSettings) []byte {
 					return []byte(policy.GetName())
 				},

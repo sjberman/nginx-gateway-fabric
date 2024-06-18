@@ -4,15 +4,16 @@ package policiesfakes
 import (
 	"sync"
 
+	policies2 "github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/nginx/config/policies"
 	"github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/policies"
 )
 
 type FakeConfigGenerator struct {
-	GenerateStub        func(policies.Policy, *policies.GlobalSettings) []byte
+	GenerateStub        func(policies2.Policy, *policies2.GlobalSettings) []byte
 	generateMutex       sync.RWMutex
 	generateArgsForCall []struct {
-		arg1 policies.Policy
-		arg2 *policies.GlobalSettings
+		arg1 policies2.Policy
+		arg2 *policies2.GlobalSettings
 	}
 	generateReturns struct {
 		result1 []byte
@@ -24,12 +25,12 @@ type FakeConfigGenerator struct {
 	invocationsMutex sync.RWMutex
 }
 
-func (fake *FakeConfigGenerator) Generate(arg1 policies.Policy, arg2 *policies.GlobalSettings) []byte {
+func (fake *FakeConfigGenerator) Generate(arg1 policies2.Policy, arg2 *policies2.GlobalSettings) []byte {
 	fake.generateMutex.Lock()
 	ret, specificReturn := fake.generateReturnsOnCall[len(fake.generateArgsForCall)]
 	fake.generateArgsForCall = append(fake.generateArgsForCall, struct {
-		arg1 policies.Policy
-		arg2 *policies.GlobalSettings
+		arg1 policies2.Policy
+		arg2 *policies2.GlobalSettings
 	}{arg1, arg2})
 	stub := fake.GenerateStub
 	fakeReturns := fake.generateReturns
@@ -50,13 +51,13 @@ func (fake *FakeConfigGenerator) GenerateCallCount() int {
 	return len(fake.generateArgsForCall)
 }
 
-func (fake *FakeConfigGenerator) GenerateCalls(stub func(policies.Policy, *policies.GlobalSettings) []byte) {
+func (fake *FakeConfigGenerator) GenerateCalls(stub func(policies2.Policy, *policies2.GlobalSettings) []byte) {
 	fake.generateMutex.Lock()
 	defer fake.generateMutex.Unlock()
 	fake.GenerateStub = stub
 }
 
-func (fake *FakeConfigGenerator) GenerateArgsForCall(i int) (policies.Policy, *policies.GlobalSettings) {
+func (fake *FakeConfigGenerator) GenerateArgsForCall(i int) (policies2.Policy, *policies2.GlobalSettings) {
 	fake.generateMutex.RLock()
 	defer fake.generateMutex.RUnlock()
 	argsForCall := fake.generateArgsForCall[i]

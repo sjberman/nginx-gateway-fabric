@@ -14,8 +14,8 @@ import (
 
 	ngfAPI "github.com/nginxinc/nginx-gateway-fabric/apis/v1alpha1"
 	"github.com/nginxinc/nginx-gateway-fabric/internal/framework/helpers"
-	"github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/policies"
-	"github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/policies/observability"
+	policies2 "github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/nginx/config/policies"
+	"github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/nginx/config/policies/observability"
 	"github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/state/graph"
 	"github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/state/resolver"
 )
@@ -30,7 +30,6 @@ func BuildConfiguration(
 	ctx context.Context,
 	g *graph.Graph,
 	resolver resolver.ServiceResolver,
-	generator policies.ConfigGenerator,
 	configVersion int,
 ) Configuration {
 	if g.GatewayClass == nil || !g.GatewayClass.Valid {
@@ -42,7 +41,7 @@ func BuildConfiguration(
 	}
 
 	upstreams := buildUpstreams(ctx, g.Gateway.Listeners, resolver)
-	httpServers, sslServers := buildServers(g, generator)
+	httpServers, sslServers := buildServers(g)
 	backendGroups := buildBackendGroups(append(httpServers, sslServers...))
 	keyPairs := buildSSLKeyPairs(g.ReferencedSecrets, g.Gateway.Listeners)
 	certBundles := buildCertBundles(g.ReferencedCaCertConfigMaps, backendGroups)
@@ -204,7 +203,7 @@ func convertBackendTLS(btp *graph.BackendTLSPolicy) *VerifyTLS {
 	return verify
 }
 
-func buildServers(g *graph.Graph, generator policies.ConfigGenerator) (http, ssl []VirtualServer) {
+func buildServers(g *graph.Graph) (http, ssl []VirtualServer) {
 	rulesForProtocol := map[v1.ProtocolType]portPathRules{
 		v1.HTTPProtocolType:  make(portPathRules),
 		v1.HTTPSProtocolType: make(portPathRules),
@@ -214,11 +213,11 @@ func buildServers(g *graph.Graph, generator policies.ConfigGenerator) (http, ssl
 		if l.Valid {
 			rules := rulesForProtocol[l.Source.Protocol][l.Source.Port]
 			if rules == nil {
-				rules = newHostPathRules(generator)
+				rules = newHostPathRules()
 				rulesForProtocol[l.Source.Protocol][l.Source.Port] = rules
 			}
 
-			rules.upsertListener(l, g.GlobalSettings)
+			rules.upsertListener(l)
 		}
 	}
 
@@ -264,7 +263,6 @@ type pathAndType struct {
 }
 
 type hostPathRules struct {
-	generator        policies.ConfigGenerator
 	rulesPerHost     map[string]map[pathAndType]PathRule
 	listenersForHost map[string]*graph.Listener
 	httpsListeners   []*graph.Listener
@@ -272,16 +270,15 @@ type hostPathRules struct {
 	listenersExist   bool
 }
 
-func newHostPathRules(generator policies.ConfigGenerator) *hostPathRules {
+func newHostPathRules() *hostPathRules {
 	return &hostPathRules{
 		rulesPerHost:     make(map[string]map[pathAndType]PathRule),
 		listenersForHost: make(map[string]*graph.Listener),
 		httpsListeners:   make([]*graph.Listener, 0),
-		generator:        generator,
 	}
 }
 
-func (hpr *hostPathRules) upsertListener(l *graph.Listener, globalSettings *policies.GlobalSettings) {
+func (hpr *hostPathRules) upsertListener(l *graph.Listener) {
 	hpr.listenersExist = true
 	hpr.port = int32(l.Source.Port)
 
@@ -294,14 +291,13 @@ func (hpr *hostPathRules) upsertListener(l *graph.Listener, globalSettings *poli
 			continue
 		}
 
-		hpr.upsertRoute(r, l, globalSettings)
+		hpr.upsertRoute(r, l)
 	}
 }
 
 func (hpr *hostPathRules) upsertRoute(
 	route *graph.L7Route,
 	listener *graph.Listener,
-	globalSettings *policies.GlobalSettings,
 ) {
 	var hostnames []string
 	GRPC := route.RouteType == graph.RouteTypeGRPC
@@ -369,6 +365,7 @@ func (hpr *hostPathRules) upsertRoute(
 				routeNsName := client.ObjectKeyFromObject(route.Source)
 
 				hostRule.GRPC = GRPC
+				hostRule.Policies = append(hostRule.Policies, pols...)
 
 				hostRule.MatchRules = append(hostRule.MatchRules, MatchRule{
 					Source:       objectSrc,
@@ -674,8 +671,8 @@ func buildBaseHTTPConfig(g *graph.Graph) BaseHTTPConfig {
 
 func buildPolicies(
 	graphPolicies []*graph.Policy,
-) []policies.Policy {
-	finalPolicies := make([]policies.Policy, 0, len(graphPolicies))
+) []policies2.Policy {
+	finalPolicies := make([]policies2.Policy, 0, len(graphPolicies))
 
 	for _, policy := range graphPolicies {
 		if !policy.Valid {

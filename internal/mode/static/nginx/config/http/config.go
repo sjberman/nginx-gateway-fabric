@@ -14,6 +14,14 @@ type Server struct {
 	GRPC          bool
 }
 
+type LocationType string
+
+const (
+	InternalLocationType LocationType = "internal"
+	ExternalLocationType LocationType = "external"
+	RedirectLocationType LocationType = "redirect"
+)
+
 // Location holds all configuration for an HTTP location.
 type Location struct {
 	Path            string
@@ -26,7 +34,8 @@ type Location struct {
 	Rewrites        []string
 	Includes        []Include
 	GRPC            bool
-	Internal        bool
+	Redirects       bool
+	Type            LocationType
 }
 
 // Header defines an HTTP header to be passed to the proxied server.

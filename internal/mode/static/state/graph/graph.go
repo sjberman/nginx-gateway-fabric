@@ -194,10 +194,6 @@ func BuildGraph(
 			NginxProxyValid:  npCfg.Valid,
 			TelemetryEnabled: spec.Telemetry != nil && spec.Telemetry.Exporter != nil,
 		}
-
-		if spec.Telemetry != nil {
-			globalSettings.TracingSpanAttributes = spec.Telemetry.SpanAttributes
-		}
 	}
 
 	secretResolver := newSecretResolver(state.Secrets)

@@ -55,8 +55,8 @@ func NewGenerator() *Generator {
 }
 
 // TODO: do I need the server here?
-func (g Generator) GenerateForServer(pols []policies.Policy, _ http.Server) policies.GenerateResult {
-	files := make([]policies.File, 0, len(pols))
+func (g Generator) GenerateForServer(pols []policies.Policy, _ http.Server) policies.GenerateResultFiles {
+	files := make(policies.GenerateResultFiles, 0, len(pols))
 
 	for _, pol := range pols {
 		csp, ok := pol.(*ngfAPI.ClientSettingsPolicy)
@@ -70,12 +70,13 @@ func (g Generator) GenerateForServer(pols []policies.Policy, _ http.Server) poli
 		})
 	}
 
-	return policies.GenerateResult{Files: files}
+	return files
 }
 
-func (g Generator) GenerateForLocation(pols []policies.Policy, location http.Location) policies.GenerateResult {
+func (g Generator) GenerateForLocation(pols []policies.Policy, location http.Location) policies.GenerateResultFiles {
 	if location.Type == http.ExternalLocationType {
-		files := make([]policies.File, 0, len(pols))
+		// TODO(sberman): are we ever going to have more than one CSPolicy for a location?
+		files := make(policies.GenerateResultFiles, 0, len(pols))
 
 		for _, pol := range pols {
 			csp, ok := pol.(*ngfAPI.ClientSettingsPolicy)
@@ -89,7 +90,7 @@ func (g Generator) GenerateForLocation(pols []policies.Policy, location http.Loc
 			})
 		}
 
-		return policies.GenerateResult{Files: files}
+		return files
 	}
 
 	var maxBodySize ngfAPI.Size
@@ -106,24 +107,20 @@ func (g Generator) GenerateForLocation(pols []policies.Policy, location http.Loc
 	}
 
 	if maxBodySize == "" {
-		return policies.GenerateResult{}
+		return nil
 	}
 
-	return policies.GenerateResult{
-		Files: []policies.File{
-			{
-				Name:    fmt.Sprintf("ClientSettingsPolicy_%s_redirect.conf", location.HTTPMatchKey),
-				Content: helpers.MustExecuteTemplate(tmplExternalRedirect, maxBodySize),
-			},
+	return policies.GenerateResultFiles{
+		{
+			Name:    fmt.Sprintf("ClientSettingsPolicy_%s_redirect.conf", location.HTTPMatchKey),
+			Content: helpers.MustExecuteTemplate(tmplExternalRedirect, maxBodySize),
 		},
 	}
 }
 
-func (g Generator) GenerateForInternalLocation(
-	pols []policies.Policy,
-	_ http.Location,
-) policies.GenerateResult {
-	files := make([]policies.File, 0, len(pols))
+func (g Generator) GenerateForInternalLocation(pols []policies.Policy) policies.GenerateResultFiles {
+	// TODO(sberman): are we ever going to have more than one CSPolicy for a location?
+	files := make(policies.GenerateResultFiles, 0, len(pols))
 
 	for _, pol := range pols {
 		csp, ok := pol.(*ngfAPI.ClientSettingsPolicy)
@@ -137,7 +134,7 @@ func (g Generator) GenerateForInternalLocation(
 		})
 	}
 
-	return policies.GenerateResult{Files: files}
+	return files
 }
 
 func isDigit(char string) bool {

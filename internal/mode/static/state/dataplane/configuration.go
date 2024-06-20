@@ -15,7 +15,6 @@ import (
 	ngfAPI "github.com/nginxinc/nginx-gateway-fabric/apis/v1alpha1"
 	"github.com/nginxinc/nginx-gateway-fabric/internal/framework/helpers"
 	policies2 "github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/nginx/config/policies"
-	"github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/nginx/config/policies/observability"
 	"github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/state/graph"
 	"github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/state/resolver"
 )
@@ -631,6 +630,16 @@ func buildTelemetry(g *graph.Graph) Telemetry {
 		tel.Interval = string(*telemetry.Exporter.Interval)
 	}
 
+	spanAttrs := make([]SpanAttribute, 0, len(telemetry.SpanAttributes))
+	for _, spanAttr := range telemetry.SpanAttributes {
+		sa := SpanAttribute{
+			Key:   spanAttr.Key,
+			Value: spanAttr.Value,
+		}
+		spanAttrs = append(spanAttrs, sa)
+	}
+	tel.SpanAttributes = spanAttrs
+
 	// FIXME(sberman): https://github.com/nginxinc/nginx-gateway-fabric/issues/2038
 	// Find a generic way to include relevant policy info at the http context so we don't need policy-specific
 	// logic in this function
@@ -638,7 +647,7 @@ func buildTelemetry(g *graph.Graph) Telemetry {
 	for _, pol := range g.NGFPolicies {
 		if obsPol, ok := pol.Source.(*ngfAPI.ObservabilityPolicy); ok {
 			if obsPol.Spec.Tracing != nil && obsPol.Spec.Tracing.Ratio != nil && *obsPol.Spec.Tracing.Ratio > 0 {
-				ratioName := observability.CreateRatioVarName(obsPol)
+				ratioName := CreateRatioVarName(*obsPol.Spec.Tracing.Ratio)
 				ratioMap[ratioName] = *obsPol.Spec.Tracing.Ratio
 			}
 		}
@@ -650,6 +659,12 @@ func buildTelemetry(g *graph.Graph) Telemetry {
 	}
 
 	return tel
+}
+
+// CreateRatioVarName builds a variable name for an ObservabilityPolicy to be used with
+// ratio-based trace sampling.
+func CreateRatioVarName(ratio int32) string {
+	return fmt.Sprintf("$otel_ratio_%d", ratio)
 }
 
 // buildBaseHTTPConfig generates the base http context config that should be applied to all servers.
@@ -669,6 +684,10 @@ func buildBaseHTTPConfig(g *graph.Graph) BaseHTTPConfig {
 	return baseConfig
 }
 
+// TODO(sberman):
+// If multiple ObsPolicies reference the same path, use the oldest
+// If one policy exists, but multiple routes, apply the policy to all.
+// Somehow need access to all policies for all routes...
 func buildPolicies(
 	graphPolicies []*graph.Policy,
 ) []policies2.Policy {

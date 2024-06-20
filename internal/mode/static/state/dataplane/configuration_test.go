@@ -3339,3 +3339,8 @@ func TestBuildAdditions(t *testing.T) {
 		})
 	}
 }
+
+func TestCreateRatioVarName(t *testing.T) {
+	g := NewWithT(t)
+	g.Expect(CreateRatioVarName(25)).To(Equal("$otel_ratio_25"))
+}

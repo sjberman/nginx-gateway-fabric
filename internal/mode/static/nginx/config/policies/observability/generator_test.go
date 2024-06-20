@@ -199,16 +199,3 @@ func TestGeneratePanics(t *testing.T) {
 
 	g.Expect(generate).To(Panic())
 }
-
-func TestCreateRatioVarName(t *testing.T) {
-	pol := &ngfAPI.ObservabilityPolicy{
-		Spec: ngfAPI.ObservabilityPolicySpec{
-			Tracing: &ngfAPI.Tracing{
-				Ratio: helpers.GetPointer[int32](25),
-			},
-		},
-	}
-
-	g := NewWithT(t)
-	g.Expect(observability.CreateRatioVarName(pol)).To(Equal("$otel_ratio_25"))
-}

@@ -1,22 +1,17 @@
 package policies
 
 import (
-	"maps"
-
 	"github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/nginx/config/http"
 )
 
 type Generator interface {
-	GenerateForLocation(policies []Policy, location http.Location) GenerateResult
+	GenerateForLocation(policies []Policy, location http.Location) GenerateResultFiles
 	// TODO: do we need this as a separate method?
-	GenerateForInternalLocation(policies []Policy, internalLocation http.Location) GenerateResult
-	GenerateForServer(policies []Policy, server http.Server) GenerateResult
+	GenerateForInternalLocation(policies []Policy) GenerateResultFiles
+	GenerateForServer(policies []Policy, server http.Server) GenerateResultFiles
 }
 
-type GenerateResult struct {
-	KeyVals map[string]interface{}
-	Files   []File
-}
+type GenerateResultFiles []File
 
 type File struct {
 	Name    string
@@ -31,40 +26,31 @@ func NewCompositeGenerator(generators ...Generator) *CompositeGenerator {
 	return &CompositeGenerator{generators: generators}
 }
 
-func (g *CompositeGenerator) GenerateForInternalLocation(
-	policies []Policy,
-	internalLocation http.Location,
-) GenerateResult {
-	var compositeResult GenerateResult
+func (g *CompositeGenerator) GenerateForInternalLocation(policies []Policy) GenerateResultFiles {
+	var compositeResult GenerateResultFiles
 
 	for _, generator := range g.generators {
-		result := generator.GenerateForInternalLocation(policies, internalLocation)
-		compositeResult.Files = append(compositeResult.Files, result.Files...)
-		maps.Copy(compositeResult.KeyVals, result.KeyVals)
+		compositeResult = append(compositeResult, generator.GenerateForInternalLocation(policies)...)
 	}
 
 	return compositeResult
 }
 
-func (g *CompositeGenerator) GenerateForServer(policies []Policy, server http.Server) GenerateResult {
-	var compositeResult GenerateResult
+func (g *CompositeGenerator) GenerateForServer(policies []Policy, server http.Server) GenerateResultFiles {
+	var compositeResult GenerateResultFiles
 
 	for _, generator := range g.generators {
-		result := generator.GenerateForServer(policies, server)
-		compositeResult.Files = append(compositeResult.Files, result.Files...)
-		maps.Copy(compositeResult.KeyVals, result.KeyVals)
+		compositeResult = append(compositeResult, generator.GenerateForServer(policies, server)...)
 	}
 
 	return compositeResult
 }
 
-func (g *CompositeGenerator) GenerateForLocation(policies []Policy, location http.Location) GenerateResult {
-	var compositeResult GenerateResult
+func (g *CompositeGenerator) GenerateForLocation(policies []Policy, location http.Location) GenerateResultFiles {
+	var compositeResult GenerateResultFiles
 
 	for _, generator := range g.generators {
-		result := generator.GenerateForLocation(policies, location)
-		compositeResult.Files = append(compositeResult.Files, result.Files...)
-		maps.Copy(compositeResult.KeyVals, result.KeyVals)
+		compositeResult = append(compositeResult, generator.GenerateForLocation(policies, location)...)
 	}
 
 	return compositeResult

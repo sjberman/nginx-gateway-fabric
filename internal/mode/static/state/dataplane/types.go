@@ -265,7 +265,7 @@ type VerifyTLS struct {
 	RootCAPath   string
 }
 
-// Telemetry represents Otel configuration for the dataplane.
+// Telemetry represents global Otel configuration for the dataplane.
 type Telemetry struct {
 	// Endpoint specifies the address of OTLP/gRPC endpoint that will accept telemetry data.
 	Endpoint string
@@ -279,6 +279,8 @@ type Telemetry struct {
 	BatchSize int32
 	// BatchCount specifies the number of pending batches per worker, spans exceeding the limit are dropped.
 	BatchCount int32
+	// SpanAttributes are global custom key/value attributes that are added to each span.
+	SpanAttributes []SpanAttribute
 }
 
 // SpanAttribute is a key value pair to be added to a tracing span.

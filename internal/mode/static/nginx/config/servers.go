@@ -134,9 +134,9 @@ func createServers(
 	}
 
 	for serverID, s := range sslServers {
-		sslServer, matchPair := createSSLServer(s, serverID, generator)
+		sslServer, matchPairs := createSSLServer(s, serverID, generator)
 		servers = append(servers, sslServer)
-		maps.Copy(finalMatchPairs, matchPair)
+		maps.Copy(finalMatchPairs, matchPairs)
 	}
 
 	return servers, finalMatchPairs
@@ -195,6 +195,7 @@ func createServer(
 		Port:       virtualServer.Port,
 		GRPC:       grpc,
 	}
+
 	server.Includes = createIncludesFromPolicyGenerateResult(
 		generator.GenerateForServer(virtualServer.Policies, server),
 	)
@@ -211,7 +212,7 @@ type rewriteConfig struct {
 	MainRewrite string
 }
 
-type httpMatchPairs map[string]interface{}
+type httpMatchPairs map[string][]routeMatch
 
 func createLocations(
 	server *dataplane.VirtualServer,
@@ -226,7 +227,6 @@ func createLocations(
 	var grpc bool
 
 	for pathRuleIdx, rule := range server.PathRules {
-
 		matches := make([]routeMatch, 0, len(rule.MatchRules))
 
 		if rule.Path == rootPath {
@@ -258,12 +258,11 @@ func createLocations(
 		internalLocations := make([]http.Location, 0, len(rule.MatchRules))
 
 		for matchRuleIdx, r := range rule.MatchRules {
-
 			if len(rule.MatchRules) != 1 || !isPathOnlyMatch(r.Match) {
 				intLocation, match := initializeInternalLocation(pathRuleIdx, matchRuleIdx, r.Match, grpc)
 				intLocation.HTTPMatchKey = httpMatchKey
 				intLocation.Includes = createIncludesFromPolicyGenerateResult(
-					generator.GenerateForInternalLocation(r.Policies, intLocation),
+					generator.GenerateForInternalLocation(r.Policies),
 				)
 
 				intLocation = updateLocationForFilters(
@@ -310,13 +309,13 @@ func needsInternalLocations(rule dataplane.PathRule) bool {
 	return len(rule.MatchRules) == 1 && !isPathOnlyMatch(rule.MatchRules[0].Match)
 }
 
-func createIncludesFromPolicyGenerateResult(res policies.GenerateResult) []http.Include {
-	if len(res.Files) == 0 {
+func createIncludesFromPolicyGenerateResult(resFiles []policies.File) []http.Include {
+	if len(resFiles) == 0 {
 		return nil
 	}
 
-	includes := make([]http.Include, 0, len(res.Files))
-	for _, file := range res.Files {
+	includes := make([]http.Include, 0, len(resFiles))
+	for _, file := range resFiles {
 		includes = append(includes, http.Include{
 			Name:    includesFolder + "/" + file.Name,
 			Content: file.Content,

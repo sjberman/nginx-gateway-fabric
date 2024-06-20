@@ -609,9 +609,6 @@ func TestBuildGraph(t *testing.T) {
 			GlobalSettings: &policies.GlobalSettings{
 				NginxProxyValid:  true,
 				TelemetryEnabled: true,
-				TracingSpanAttributes: []ngfAPI.SpanAttribute{
-					{Key: "key", Value: "value"},
-				},
 			},
 		}
 	}

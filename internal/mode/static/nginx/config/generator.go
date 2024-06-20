@@ -5,6 +5,7 @@ import (
 
 	"github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/nginx/config/policies"
 	"github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/nginx/config/policies/clientsettings"
+	"github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/nginx/config/policies/observability"
 	"github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/nginx/file"
 	"github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/state/dataplane"
 )
@@ -87,11 +88,9 @@ func (g GeneratorImpl) Generate(conf dataplane.Configuration) []file.File {
 		files = append(files, generatePEM(id, pair.Cert, pair.Key))
 	}
 
-	// TODO: Can we create the policy generator here and inject the telemetry base config into the observability gen
-
 	policyGenerator := policies.NewCompositeGenerator(
 		clientsettings.NewGenerator(),
-		/*observability.NewGenerator(conf.Telemetry) */
+		observability.NewGenerator(conf.Telemetry),
 	)
 
 	files = append(files, g.generateHTTPConfig(conf, policyGenerator)...)

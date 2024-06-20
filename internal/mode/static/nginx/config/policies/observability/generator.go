@@ -6,10 +6,16 @@ import (
 
 	ngfAPI "github.com/nginxinc/nginx-gateway-fabric/apis/v1alpha1"
 	"github.com/nginxinc/nginx-gateway-fabric/internal/framework/helpers"
+	"github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/nginx/config/http"
 	"github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/nginx/config/policies"
+	"github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/state/dataplane"
 )
 
-var tmpl = template.Must(template.New("observability policy").Parse(observabilityTemplate))
+var (
+	tmpl            = template.Must(template.New("observability policy").Parse(observabilityTemplate))
+	tmplInternal    = template.Must(template.New("observability policy internal").Parse(internalTemplate))
+	tmplExtRedirect = template.Must(template.New("observability policy ext redirect").Parse(externalRedirectTemplate))
+)
 
 const observabilityTemplate = `
 {{- if .Tracing }}
@@ -29,10 +35,105 @@ otel_span_attr "{{ $attr.Key }}" "{{ $attr.Value }}";
 {{- end }}
 `
 
-// Generate generates configuration as []byte for an ObservabilityPolicy.
-func Generate(policy policies.Policy, globalSettings *policies.GlobalSettings) []byte {
-	obs := helpers.MustCastObject[*ngfAPI.ObservabilityPolicy](policy)
+// TODO(sberman): (add unit test for span name)
+const internalTemplate = `
+{{- if .Tracing }}
+  {{- if .Tracing.SpanName }}
+otel_span_name "{{ .Tracing.SpanName }}";
+  {{- else }}
+otel_span_name $request_uri_path;
+  {{- end }}
+  {{- range $attr := .Tracing.SpanAttributes }}
+otel_span_attr "{{ $attr.Key }}" "{{ $attr.Value }}";
+  {{- end }}
+  {{- range $attr := .GlobalSpanAttributes }}
+otel_span_attr "{{ $attr.Key }}" "{{ $attr.Value }}";
+  {{- end }}
+{{- end }}
+`
 
+const externalRedirectTemplate = `
+{{- if .Tracing }}
+otel_trace {{ .Strategy }};
+  {{- if .Tracing.Context }}
+otel_trace_context {{ .Tracing.Context }};
+  {{- end }}
+{{- end }}
+`
+
+type Generator struct {
+	telemetryConf dataplane.Telemetry
+}
+
+func NewGenerator(telemetry dataplane.Telemetry) *Generator {
+	return &Generator{telemetryConf: telemetry}
+}
+
+func (g Generator) GenerateForServer(_ []policies.Policy, _ http.Server) policies.GenerateResultFiles {
+	return nil
+}
+
+func (g Generator) GenerateForLocation(pols []policies.Policy, location http.Location) policies.GenerateResultFiles {
+	buildTemplate := func(
+		tmplate *template.Template,
+		fileSuffix string,
+		includeGlobalAttrs bool,
+	) policies.GenerateResultFiles {
+		for _, pol := range pols {
+			obs, ok := pol.(*ngfAPI.ObservabilityPolicy)
+			if !ok {
+				continue
+			}
+
+			fields := map[string]interface{}{
+				"Tracing":  obs.Spec.Tracing,
+				"Strategy": getStrategy(obs),
+			}
+			if includeGlobalAttrs {
+				fields["GlobalSpanAttributes"] = g.telemetryConf.SpanAttributes
+			}
+
+			return policies.GenerateResultFiles{
+				{
+					Name:    fmt.Sprintf("ObservabilityPolicy_%s_%s_%s.conf", obs.Namespace, obs.Name, fileSuffix),
+					Content: helpers.MustExecuteTemplate(tmplate, fields),
+				},
+			}
+		}
+		return nil
+	}
+
+	if location.Type == http.ExternalLocationType {
+		return buildTemplate(tmpl, "ext", true)
+	}
+
+	return buildTemplate(tmplExtRedirect, "redirect", false)
+}
+
+func (g Generator) GenerateForInternalLocation(pols []policies.Policy) policies.GenerateResultFiles {
+	for _, pol := range pols {
+		obs, ok := pol.(*ngfAPI.ObservabilityPolicy)
+		if !ok {
+			continue
+		}
+
+		fields := map[string]interface{}{
+			"Tracing":              obs.Spec.Tracing,
+			"GlobalSpanAttributes": g.telemetryConf.SpanAttributes,
+		}
+
+		return policies.GenerateResultFiles{
+			{
+				Name:    fmt.Sprintf("ObservabilityPolicy_%s_%s_int.conf", obs.Namespace, obs.Name),
+				Content: helpers.MustExecuteTemplate(tmplInternal, fields),
+			},
+		}
+	}
+
+	return nil
+}
+
+func getStrategy(obs *ngfAPI.ObservabilityPolicy) string {
 	var strategy string
 	if obs.Spec.Tracing != nil {
 		switch obs.Spec.Tracing.Strategy {
@@ -42,7 +143,7 @@ func Generate(policy policies.Policy, globalSettings *policies.GlobalSettings) [
 			strategy = "on"
 			if obs.Spec.Tracing.Ratio != nil {
 				if *obs.Spec.Tracing.Ratio > 0 {
-					strategy = CreateRatioVarName(obs)
+					strategy = dataplane.CreateRatioVarName(*obs.Spec.Tracing.Ratio)
 				} else {
 					strategy = "off"
 				}
@@ -52,22 +153,5 @@ func Generate(policy policies.Policy, globalSettings *policies.GlobalSettings) [
 		}
 	}
 
-	var spanAttributes []ngfAPI.SpanAttribute
-	if globalSettings != nil {
-		spanAttributes = globalSettings.TracingSpanAttributes
-	}
-
-	fields := map[string]interface{}{
-		"Tracing":              obs.Spec.Tracing,
-		"Strategy":             strategy,
-		"GlobalSpanAttributes": spanAttributes,
-	}
-
-	return helpers.MustExecuteTemplate(tmpl, fields)
-}
-
-// CreateRatioVarName builds a variable name for an ObservabilityPolicy to be used with
-// ratio-based trace sampling.
-func CreateRatioVarName(policy *ngfAPI.ObservabilityPolicy) string {
-	return fmt.Sprintf("$otel_ratio_%d", *policy.Spec.Tracing.Ratio)
+	return strategy
 }

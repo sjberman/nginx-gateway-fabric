@@ -410,6 +410,7 @@ var _ = Describe("eventHandler", func() {
 
 		BeforeEach(func() {
 			fakeSecretStore = &staticfakes.FakeSecretStorer{}
+			fakeSecretStore.GetNSNameReturns(types.NamespacedName{Namespace: "nginx-gateway", Name: "usage"})
 			usageSecret = &v1.Secret{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "usage",
@@ -434,21 +435,18 @@ var _ = Describe("eventHandler", func() {
 		Context("usage secret is initialized", func() {
 			var usageSecretHandler *eventHandlerImpl
 			BeforeEach(func() {
-				usageCfg := &config.UsageReportConfig{
-					SecretNsName: client.ObjectKeyFromObject(usageSecret),
-				}
 				usageSecretHandler = newEventHandlerImpl(eventHandlerConfig{
 					k8sClient:                     fake.NewFakeClient(),
 					processor:                     fakeProcessor,
 					nginxConfiguredOnStartChecker: newNginxConfiguredOnStartChecker(),
 					controlConfigNSName:           types.NamespacedName{Namespace: namespace, Name: configName},
-					usageReportConfig:             usageCfg,
 					usageSecret:                   fakeSecretStore,
 					gatewayPodConfig: config.GatewayPodConfig{
 						ServiceName: "nginx-gateway",
 						Namespace:   "nginx-gateway",
 					},
 					metricsCollector: collectors.NewControllerNoopCollector(),
+					eventRecorder:    fakeEventRecorder,
 				})
 			})
 
@@ -489,6 +487,13 @@ var _ = Describe("eventHandler", func() {
 				usageSecretHandler.HandleEventBatch(context.Background(), ctlrZap.New(), batch)
 				Expect(fakeSecretStore.DeleteCallCount()).To(Equal(1))
 				Expect(fakeProcessor.CaptureDeleteChangeCallCount()).To(Equal(1))
+
+				Expect(fakeEventRecorder.Events).To(HaveLen(1))
+				event := <-fakeEventRecorder.Events
+				Expect(event).To(Equal(
+					"Warning ResourceDeleted NGINX Plus license Secret 'usage' was deleted; " +
+						"original JWT token will be used until Secret is restored or token expires",
+				))
 			})
 		})
 	})

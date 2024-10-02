@@ -2,6 +2,7 @@ package static
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -44,6 +45,8 @@ type secretStorer interface {
 	Set(*v1.Secret)
 	// Delete nullifies the Secret value.
 	Delete()
+	// GetNSName returns the namespaced name of the Secret.
+	GetNSName() types.NamespacedName
 }
 
 // eventHandlerConfig holds configuration parameters for eventHandlerImpl.
@@ -70,8 +73,6 @@ type eventHandlerConfig struct {
 	logLevelSetter logLevelSetter
 	// eventRecorder records events for Kubernetes resources.
 	eventRecorder record.EventRecorder
-	// usageReportConfig contains the configuration for NGINX Plus usage reporting.
-	usageReportConfig *ngfConfig.UsageReportConfig
 	// nginxConfiguredOnStartChecker sets the health of the Pod to Ready once we've written out our initial config.
 	nginxConfiguredOnStartChecker *nginxConfiguredOnStartChecker
 	// gatewayPodConfig contains information about this Pod.
@@ -82,6 +83,8 @@ type eventHandlerConfig struct {
 	gatewayCtlrName string
 	// updateGatewayClassStatus enables updating the status of the GatewayClass resource.
 	updateGatewayClassStatus bool
+	// plus is whether or not we're running NGINX Plus.
+	plus bool
 }
 
 const (
@@ -133,9 +136,8 @@ func newEventHandlerImpl(cfg eventHandlerConfig) *eventHandlerImpl {
 	handler.objectFilters = map[filterKey]objectFilter{
 		// NginxGateway CRD
 		objectFilterKey(&ngfAPI.NginxGateway{}, handler.cfg.controlConfigNSName): {
-			upsert:               handler.nginxGatewayCRDUpsert,
-			delete:               handler.nginxGatewayCRDDelete,
-			captureChangeInGraph: false,
+			upsert: handler.nginxGatewayCRDUpsert,
+			delete: handler.nginxGatewayCRDDelete,
 		},
 		// NGF-fronting Service
 		objectFilterKey(
@@ -151,10 +153,9 @@ func newEventHandlerImpl(cfg eventHandlerConfig) *eventHandlerImpl {
 		},
 	}
 
-	if handler.cfg.usageReportConfig != nil {
+	if handler.cfg.plus {
 		// N+ usage reporting Secret
-		nsName := handler.cfg.usageReportConfig.SecretNsName
-		handler.objectFilters[objectFilterKey(&v1.Secret{}, nsName)] = objectFilter{
+		handler.objectFilters[objectFilterKey(&v1.Secret{}, handler.cfg.usageSecret.GetNSName())] = objectFilter{
 			upsert:               handler.nginxPlusUsageSecretUpsert,
 			delete:               handler.nginxPlusUsageSecretDelete,
 			captureChangeInGraph: true,
@@ -621,8 +622,24 @@ func (h *eventHandlerImpl) nginxPlusUsageSecretUpsert(_ context.Context, _ logr.
 
 func (h *eventHandlerImpl) nginxPlusUsageSecretDelete(
 	_ context.Context,
-	_ logr.Logger,
-	_ types.NamespacedName,
+	logger logr.Logger,
+	nsName types.NamespacedName,
 ) {
 	h.cfg.usageSecret.Delete()
+
+	msg := fmt.Sprintf("NGINX Plus license Secret '%s' was deleted; "+
+		"original JWT token will be used until Secret is restored or token expires", nsName.Name)
+	logger.Error(errors.New(msg), "")
+
+	h.cfg.eventRecorder.Event(
+		&v1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      nsName.Name,
+				Namespace: nsName.Namespace,
+			},
+		},
+		v1.EventTypeWarning,
+		"ResourceDeleted",
+		msg,
+	)
 }

@@ -127,9 +127,10 @@ stop-longevity-test: nfr-test ## Stop the longevity test and collects results
 		--trace -r -v --buildvcs --force-newlines $(GITHUB_OUTPUT) \
 		--label-filter "nfr" $(GINKGO_FLAGS) --timeout 5h ./suite --  --gateway-api-version=$(GW_API_VERSION) \
 		--gateway-api-prev-version=$(GW_API_PREV_VERSION) --image-tag=$(TAG) --version-under-test=$(NGF_VERSION) \
-		--plus-enabled=$(PLUS_ENABLED) --ngf-image-repo=$(PREFIX) --nginx-image-repo=$(NGINX_PREFIX) --nginx-plus-image-repo=$(NGINX_PLUS_PREFIX) \
+		--ngf-image-repo=$(PREFIX) --nginx-image-repo=$(NGINX_PREFIX) --nginx-plus-image-repo=$(NGINX_PLUS_PREFIX) \
 		--pull-policy=$(PULL_POLICY) --service-type=$(GW_SERVICE_TYPE) \
-		--is-gke-internal-lb=$(GW_SVC_GKE_INTERNAL)
+		--is-gke-internal-lb=$(GW_SVC_GKE_INTERNAL) --plus-enabled=$(PLUS_ENABLED) \
+		--plus-license-file-name=$(PLUS_LICENSE_FILE)
 
 .PHONY: test
 test: build-crossplane-image ## Runs the functional tests on your kind k8s cluster
@@ -139,9 +140,10 @@ test: build-crossplane-image ## Runs the functional tests on your kind k8s clust
 		--label-filter "functional" $(GINKGO_FLAGS) ./suite -- \
 		--gateway-api-version=$(GW_API_VERSION) --gateway-api-prev-version=$(GW_API_PREV_VERSION) \
 		--image-tag=$(TAG) --version-under-test=$(NGF_VERSION) \
-		--plus-enabled=$(PLUS_ENABLED) --ngf-image-repo=$(PREFIX) --nginx-image-repo=$(NGINX_PREFIX) --nginx-plus-image-repo=$(NGINX_PLUS_PREFIX) \
+		--ngf-image-repo=$(PREFIX) --nginx-image-repo=$(NGINX_PREFIX) --nginx-plus-image-repo=$(NGINX_PLUS_PREFIX) \
 		--pull-policy=$(PULL_POLICY) --service-type=$(GW_SERVICE_TYPE) \
-		--is-gke-internal-lb=$(GW_SVC_GKE_INTERNAL) --cluster-name=$(CLUSTER_NAME)
+		--is-gke-internal-lb=$(GW_SVC_GKE_INTERNAL) --cluster-name=$(CLUSTER_NAME) --plus-enabled=$(PLUS_ENABLED) \
+		--plus-license-file-name=$(PLUS_LICENSE_FILE)
 
 .PHONY: test-with-plus
 test-with-plus: PLUS_ENABLED=true
@@ -175,7 +177,7 @@ deploy-updated-provisioner: ## Update provisioner manifest and deploy to the con
 
 .PHONY: generate-static-deployment
 generate-static-deployment:
-	helm template nginx-gateway $(CHART_DIR) --set nameOverride=nginx-gateway --set metrics.enable=false --set nginxGateway.productTelemetry.enable=false -n nginx-gateway -s templates/deployment.yaml --set nginxGateway.image.repository=$(PREFIX) --set nginxGateway.image.tag=$(TAG) --set nginxGateway.image.pullPolicy=Never --set nginx.image.repository=$(NGINX_PREFIX) --set nginx.image.tag=$(TAG) --set nginx.image.pullPolicy=Never --set nginxGateway.gwAPIExperimentalFeatures.enable=$(ENABLE_EXPERIMENTAL) --set nginx.plus=$(PLUS_ENABLED) > $(SELF_DIR)config/tests/static-deployment.yaml
+	helm template nginx-gateway $(CHART_DIR) --set nameOverride=nginx-gateway --set metrics.enable=false --set nginxGateway.productTelemetry.enable=false -n nginx-gateway -s templates/deployment.yaml --set nginxGateway.image.repository=$(PREFIX) --set nginxGateway.image.tag=$(TAG) --set nginxGateway.image.pullPolicy=Never --set nginx.image.repository=$(NGINX_PREFIX) --set nginx.image.tag=$(TAG) --set nginx.image.pullPolicy=Never --set nginxGateway.gwAPIExperimentalFeatures.enable=$(ENABLE_EXPERIMENTAL) --set nginx.plus=$(PLUS_ENABLED) --set nginx.usage.secretName=$(PLUS_SECRET) > $(SELF_DIR)config/tests/static-deployment.yaml
 
 # this target is used to install the gateway-api CRDs from the main branch (only used in the nightly CI job)
 # it overrides the target in the main Makefile when the GW_API_VERSION is set to main

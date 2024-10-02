@@ -2,7 +2,6 @@ package static
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -123,6 +122,17 @@ func StartManager(cfg config.Config) error {
 	genericValidator := ngxvalidation.GenericValidator{}
 	policyManager := createPolicyManager(mustExtractGVK, genericValidator)
 
+	var usageSecret *usage.Secret
+	var plusSecretName types.NamespacedName
+
+	if cfg.Plus && cfg.UsageReportConfig != nil {
+		plusSecretName = types.NamespacedName{
+			Namespace: cfg.GatewayPodConfig.Namespace,
+			Name:      cfg.UsageReportConfig.SecretName,
+		}
+		usageSecret = usage.NewUsageSecret(plusSecretName)
+	}
+
 	processor := state.NewChangeProcessorImpl(state.ChangeProcessorConfig{
 		GatewayCtlrName:  cfg.GatewayCtlrName,
 		GatewayClassName: cfg.GatewayClassName,
@@ -135,6 +145,7 @@ func StartManager(cfg config.Config) error {
 		EventRecorder:  recorder,
 		MustExtractGVK: mustExtractGVK,
 		ProtectedPorts: protectedPorts,
+		PlusSecretName: plusSecretName,
 	})
 
 	processHandler := ngxruntime.NewProcessHandlerImpl(os.ReadFile, os.Stat)
@@ -152,25 +163,6 @@ func StartManager(cfg config.Config) error {
 	)
 
 	var ngxPlusClient ngxruntime.NginxPlusClient
-	var usageSecret *usage.Secret
-
-	if cfg.Plus {
-		if cfg.UsageReportConfig != nil {
-			usageSecret = usage.NewUsageSecret()
-			reporter, err := createUsageReporterJob(mgr.GetAPIReader(), cfg, usageSecret, nginxChecker.getReadyCh())
-			if err != nil {
-				return fmt.Errorf("error creating usage reporter job")
-			}
-
-			if err = mgr.Add(reporter); err != nil {
-				return fmt.Errorf("cannot register usage reporter: %w", err)
-			}
-		} else {
-			if err = mgr.Add(createUsageWarningJob(cfg, nginxChecker.getReadyCh())); err != nil {
-				return fmt.Errorf("cannot register usage warning job: %w", err)
-			}
-		}
-	}
 
 	if cfg.MetricsConfig.Enabled {
 		constLabels := map[string]string{"class": cfg.GatewayClassName}
@@ -218,8 +210,15 @@ func StartManager(cfg config.Config) error {
 		k8sClient:       mgr.GetClient(),
 		processor:       processor,
 		serviceResolver: resolver.NewServiceResolverImpl(mgr.GetClient()),
-		generator:       ngxcfg.NewGeneratorImpl(cfg.Plus),
-		logLevelSetter:  logLevelSetter,
+		generator: ngxcfg.NewGeneratorImpl(
+			cfg.Plus,
+			cfg.UsageReportConfig,
+			usageSecret,
+			&cfg.GatewayPodConfig,
+			mgr.GetAPIReader(),
+			cfg.Logger.WithName("generator"),
+		),
+		logLevelSetter: logLevelSetter,
 		nginxFileMgr: file.NewManagerImpl(
 			cfg.Logger.WithName("nginxFileManager"),
 			file.NewStdLibOSFileManager(),
@@ -237,10 +236,10 @@ func StartManager(cfg config.Config) error {
 		controlConfigNSName:           controlConfigNSName,
 		gatewayPodConfig:              cfg.GatewayPodConfig,
 		metricsCollector:              handlerCollector,
-		usageReportConfig:             cfg.UsageReportConfig,
 		usageSecret:                   usageSecret,
 		gatewayCtlrName:               cfg.GatewayCtlrName,
 		updateGatewayClassStatus:      cfg.UpdateGatewayClassStatus,
+		plus:                          cfg.Plus,
 	})
 
 	objects, objectLists := prepareFirstEventBatchPreparerArgs(cfg)
@@ -612,52 +611,6 @@ func createTelemetryJob(
 			},
 		),
 	}, nil
-}
-
-func createUsageReporterJob(
-	k8sClient client.Reader,
-	cfg config.Config,
-	usageSecret *usage.Secret,
-	readyCh <-chan struct{},
-) (*runnables.Leader, error) {
-	logger := cfg.Logger.WithName("usageReporter")
-	reporter, err := usage.NewNIMReporter(
-		usageSecret,
-		cfg.UsageReportConfig.ServerURL,
-		cfg.UsageReportConfig.InsecureSkipVerify,
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	return &runnables.Leader{
-		Runnable: runnables.NewCronJob(runnables.CronJobConfig{
-			Worker:       usage.CreateUsageJobWorker(logger, k8sClient, reporter, cfg),
-			Logger:       logger,
-			Period:       cfg.ProductTelemetryConfig.ReportPeriod,
-			JitterFactor: telemetryJitterFactor,
-			ReadyCh:      readyCh,
-		}),
-	}, nil
-}
-
-func createUsageWarningJob(cfg config.Config, readyCh <-chan struct{}) *runnables.LeaderOrNonLeader {
-	logger := cfg.Logger.WithName("usageReporter")
-	worker := func(_ context.Context) {
-		logger.Error(
-			errors.New("usage reporting not enabled"),
-			"Usage reporting must be enabled when using NGINX Plus; redeploy with usage reporting enabled",
-		)
-	}
-
-	return &runnables.LeaderOrNonLeader{
-		Runnable: runnables.NewCronJob(runnables.CronJobConfig{
-			Worker:  worker,
-			Logger:  logger,
-			Period:  1 * time.Hour,
-			ReadyCh: readyCh,
-		}),
-	}
 }
 
 func prepareFirstEventBatchPreparerArgs(cfg config.Config) ([]client.Object, []client.ObjectList) {

@@ -38,8 +38,12 @@ spec:
         - copy
         - --source
         - /includes/main.conf
+        {{- if .Values.nginx.plus }}
+        - --source
+        - /includes/mgmt.conf
+        {{- end }}
         - --destination
-        - /etc/nginx/main-includes/main.conf
+        - /etc/nginx/main-includes
         securityContext:
           seccompProfile:
             type: RuntimeDefault
@@ -52,7 +56,7 @@ spec:
           runAsUser: 102
           runAsGroup: 1001
         volumeMounts:
-        - name: nginx-includes-configmap
+        - name: nginx-includes-bootstrap
           mountPath: /includes
         - name: nginx-main-includes
           mountPath: /etc/nginx/main-includes
@@ -93,14 +97,11 @@ spec:
         {{- if .Values.nginx.usage.secretName }}
         - --usage-report-secret={{ .Values.nginx.usage.secretName }}
         {{- end }}
-        {{- if .Values.nginx.usage.serverURL }}
-        - --usage-report-server-url={{ .Values.nginx.usage.serverURL }}
+        {{- if .Values.nginx.usage.endpoint }}
+        - --usage-report-endpoint={{ .Values.nginx.usage.endpoint }}
         {{- end }}
-        {{- if .Values.nginx.usage.clusterName }}
-        - --usage-report-cluster-name={{ .Values.nginx.usage.clusterName }}
-        {{- end }}
-        {{- if .Values.nginx.usage.insecureSkipVerify }}
-        - --usage-report-skip-verify
+        {{- if .Values.nginx.usage.resolver }}
+        - --usage-report-resolver={{ .Values.nginx.usage.resolver }}
         {{- end }}
         {{- if .Values.nginxGateway.snippetsFilters.enable }}
         - --snippets-filters
@@ -208,8 +209,15 @@ spec:
           mountPath: /var/run/nginx
         - name: nginx-cache
           mountPath: /var/cache/nginx
+        - name: nginx-lib
+          mountPath: /var/lib/nginx
         - name: nginx-includes
           mountPath: /etc/nginx/includes
+        {{- if .Values.nginx.usage.secretName }}
+        - name: nginx-plus-license
+          mountPath: /etc/nginx/license.jwt
+          subPath: license.jwt
+        {{- end }}
         {{- with .Values.nginx.extraVolumeMounts -}}
         {{ toYaml . | nindent 8 }}
         {{- end }}
@@ -251,11 +259,18 @@ spec:
         emptyDir: {}
       - name: nginx-cache
         emptyDir: {}
+      - name: nginx-lib
+        emptyDir: {}
       - name: nginx-includes
         emptyDir: {}
-      - name: nginx-includes-configmap
+      - name: nginx-includes-bootstrap
         configMap:
-          name: nginx-includes
+          name: nginx-includes-bootstrap
+      {{- if .Values.nginx.usage.secretName }}
+      - name: nginx-plus-license
+        secret:
+          secretName: {{ .Values.nginx.usage.secretName }}
+      {{- end }}
       {{- with .Values.extraVolumes -}}
       {{ toYaml . | nindent 6 }}
       {{- end }}

@@ -76,6 +76,8 @@ type ChangeProcessorConfig struct {
 	GatewayCtlrName string
 	// GatewayClassName is the name of the GatewayClass resource.
 	GatewayClassName string
+	// PlusSecretName is the namespaced name of the NGINX Plus JWT license Secret.
+	PlusSecretName types.NamespacedName
 }
 
 // ChangeProcessorImpl is an implementation of ChangeProcessor.
@@ -275,6 +277,7 @@ func (c *ChangeProcessorImpl) Process() (ChangeType, *graph.Graph) {
 		c.clusterState,
 		c.cfg.GatewayCtlrName,
 		c.cfg.GatewayClassName,
+		c.cfg.PlusSecretName,
 		c.cfg.Validators,
 		c.cfg.ProtectedPorts,
 	)

@@ -104,14 +104,12 @@ type ProductTelemetryConfig struct {
 
 // UsageReportConfig contains the configuration for NGINX Plus usage reporting.
 type UsageReportConfig struct {
-	// SecretNsName is the namespaced name of the Secret containing the server credentials.
-	SecretNsName types.NamespacedName
-	// ServerURL is the base URL of the reporting server.
-	ServerURL string
-	// ClusterDisplayName is the display name of the cluster. Optional.
-	ClusterDisplayName string
-	// InsecureSkipVerify controls whether the client verifies the server cert.
-	InsecureSkipVerify bool
+	// SecretName is the name of the Secret containing the server credentials.
+	SecretName string
+	// Endpoint is the endpoint of the reporting server.
+	Endpoint string
+	// Resolver is the nameserver for resolving the Endpoint.
+	Resolver string
 }
 
 // Flags contains the NGF command-line flag names and values.

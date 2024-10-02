@@ -5,12 +5,23 @@ import (
 	"sync"
 
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 type FakeSecretStorer struct {
 	DeleteStub        func()
 	deleteMutex       sync.RWMutex
 	deleteArgsForCall []struct {
+	}
+	GetNSNameStub        func() types.NamespacedName
+	getNSNameMutex       sync.RWMutex
+	getNSNameArgsForCall []struct {
+	}
+	getNSNameReturns struct {
+		result1 types.NamespacedName
+	}
+	getNSNameReturnsOnCall map[int]struct {
+		result1 types.NamespacedName
 	}
 	SetStub        func(*v1.Secret)
 	setMutex       sync.RWMutex
@@ -43,6 +54,59 @@ func (fake *FakeSecretStorer) DeleteCalls(stub func()) {
 	fake.deleteMutex.Lock()
 	defer fake.deleteMutex.Unlock()
 	fake.DeleteStub = stub
+}
+
+func (fake *FakeSecretStorer) GetNSName() types.NamespacedName {
+	fake.getNSNameMutex.Lock()
+	ret, specificReturn := fake.getNSNameReturnsOnCall[len(fake.getNSNameArgsForCall)]
+	fake.getNSNameArgsForCall = append(fake.getNSNameArgsForCall, struct {
+	}{})
+	stub := fake.GetNSNameStub
+	fakeReturns := fake.getNSNameReturns
+	fake.recordInvocation("GetNSName", []interface{}{})
+	fake.getNSNameMutex.Unlock()
+	if stub != nil {
+		return stub()
+	}
+	if specificReturn {
+		return ret.result1
+	}
+	return fakeReturns.result1
+}
+
+func (fake *FakeSecretStorer) GetNSNameCallCount() int {
+	fake.getNSNameMutex.RLock()
+	defer fake.getNSNameMutex.RUnlock()
+	return len(fake.getNSNameArgsForCall)
+}
+
+func (fake *FakeSecretStorer) GetNSNameCalls(stub func() types.NamespacedName) {
+	fake.getNSNameMutex.Lock()
+	defer fake.getNSNameMutex.Unlock()
+	fake.GetNSNameStub = stub
+}
+
+func (fake *FakeSecretStorer) GetNSNameReturns(result1 types.NamespacedName) {
+	fake.getNSNameMutex.Lock()
+	defer fake.getNSNameMutex.Unlock()
+	fake.GetNSNameStub = nil
+	fake.getNSNameReturns = struct {
+		result1 types.NamespacedName
+	}{result1}
+}
+
+func (fake *FakeSecretStorer) GetNSNameReturnsOnCall(i int, result1 types.NamespacedName) {
+	fake.getNSNameMutex.Lock()
+	defer fake.getNSNameMutex.Unlock()
+	fake.GetNSNameStub = nil
+	if fake.getNSNameReturnsOnCall == nil {
+		fake.getNSNameReturnsOnCall = make(map[int]struct {
+			result1 types.NamespacedName
+		})
+	}
+	fake.getNSNameReturnsOnCall[i] = struct {
+		result1 types.NamespacedName
+	}{result1}
 }
 
 func (fake *FakeSecretStorer) Set(arg1 *v1.Secret) {
@@ -82,6 +146,8 @@ func (fake *FakeSecretStorer) Invocations() map[string][][]interface{} {
 	defer fake.invocationsMutex.RUnlock()
 	fake.deleteMutex.RLock()
 	defer fake.deleteMutex.RUnlock()
+	fake.getNSNameMutex.RLock()
+	defer fake.getNSNameMutex.RUnlock()
 	fake.setMutex.RLock()
 	defer fake.setMutex.RUnlock()
 	copiedInvocations := map[string][][]interface{}{}

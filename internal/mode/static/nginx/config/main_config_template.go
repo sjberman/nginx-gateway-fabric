@@ -11,3 +11,21 @@ error_log stderr {{ .Conf.Logging.ErrorLevel }};
 include {{ $i.Name }};
 {{ end -}}
 `
+
+const mgmtIncludesTemplateText = `
+mgmt {
+	{{- if .Endpoint }}
+	usage_report endpoint={{ .Endpoint }};
+	{{- end }}
+	{{- if .Resolver }}
+	resolver {{ .Resolver }};
+	{{- end }}
+	license_token {{ .LicenseTokenFile }};
+	{{- if .DeploymentCtxFile }}
+	deployment_context {{ .DeploymentCtxFile }};
+	{{- end }}
+	{{- if .SkipVerify }}
+	ssl_verify off;
+	{{- end }}
+}
+`

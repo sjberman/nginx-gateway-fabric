@@ -4,18 +4,21 @@ import (
 	"sync"
 
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 // Secret implements the SecretStorer interface.
 type Secret struct {
 	secret *v1.Secret
 	lock   *sync.Mutex
+	nsName types.NamespacedName
 }
 
 // NewUsageSecret creates a new Secret wrapper.
-func NewUsageSecret() *Secret {
+func NewUsageSecret(nsName types.NamespacedName) *Secret {
 	return &Secret{
-		lock: &sync.Mutex{},
+		lock:   &sync.Mutex{},
+		nsName: nsName,
 	}
 }
 
@@ -35,14 +38,19 @@ func (s *Secret) Delete() {
 	s.secret = nil
 }
 
-// GetCredentials returns the base64 encoded username and password from the Secret.
-func (s *Secret) GetCredentials() ([]byte, []byte) {
+// GetNSName returns the namespaced name of the Secret.
+func (s *Secret) GetNSName() types.NamespacedName {
+	return s.nsName
+}
+
+// GetJWT returns the base64 encoded JWT from the Secret.
+func (s *Secret) GetJWT() []byte {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
 	if s.secret != nil {
-		return s.secret.Data["username"], s.secret.Data["password"]
+		return s.secret.Data["license.jwt"]
 	}
 
-	return nil, nil
+	return nil
 }

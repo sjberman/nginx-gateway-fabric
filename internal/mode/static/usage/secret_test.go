@@ -6,11 +6,12 @@ import (
 	. "github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 func TestSet(t *testing.T) {
 	t.Parallel()
-	store := NewUsageSecret()
+	store := NewUsageSecret(types.NamespacedName{})
 	secret := &v1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "secret",
@@ -27,7 +28,7 @@ func TestSet(t *testing.T) {
 
 func TestDelete(t *testing.T) {
 	t.Parallel()
-	store := NewUsageSecret()
+	store := NewUsageSecret(types.NamespacedName{})
 	secret := &v1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "secret",
@@ -43,29 +44,36 @@ func TestDelete(t *testing.T) {
 	g.Expect(store.secret).To(BeNil())
 }
 
-func TestGetCredentials(t *testing.T) {
+func TestGetNSName(t *testing.T) {
 	t.Parallel()
-	store := NewUsageSecret()
+
+	nsName := types.NamespacedName{Name: "secret", Namespace: "custom"}
+	store := NewUsageSecret(nsName)
+
+	g := NewWithT(t)
+	g.Expect(store.GetNSName()).To(Equal(nsName))
+}
+
+func TestGetJWT(t *testing.T) {
+	t.Parallel()
+	store := NewUsageSecret(types.NamespacedName{})
 	secret := &v1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "secret",
 			Namespace: "custom",
 		},
 		Data: map[string][]byte{
-			"username": []byte("user"),
-			"password": []byte("pass"),
+			"license.jwt": []byte("license"),
 		},
 	}
 
 	g := NewWithT(t)
 
-	user, pass := store.GetCredentials()
-	g.Expect(user).To(BeNil())
-	g.Expect(pass).To(BeNil())
+	jwt := store.GetJWT()
+	g.Expect(jwt).To(BeNil())
 
 	store.Set(secret)
 
-	user, pass = store.GetCredentials()
-	g.Expect(user).To(Equal([]byte("user")))
-	g.Expect(pass).To(Equal([]byte("pass")))
+	jwt = store.GetJWT()
+	g.Expect(jwt).To(Equal([]byte("license")))
 }

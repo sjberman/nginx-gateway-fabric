@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"runtime/debug"
 	"strconv"
 	"time"
@@ -64,9 +65,9 @@ func createStaticModeCommand() *cobra.Command {
 		plusFlag                    = "nginx-plus"
 		gwAPIExperimentalFlag       = "gateway-api-experimental-features"
 		usageReportSecretFlag       = "usage-report-secret"
-		usageReportServerURLFlag    = "usage-report-server-url"
+		usageReportEndpointFlag     = "usage-report-endpoint"
+		usageReportResolverFlag     = "usage-report-resolver"
 		usageReportSkipVerifyFlag   = "usage-report-skip-verify"
-		usageReportClusterNameFlag  = "usage-report-cluster-name"
 		snippetsFiltersFlag         = "snippets-filters"
 	)
 
@@ -110,17 +111,20 @@ func createStaticModeCommand() *cobra.Command {
 
 		disableProductTelemetry bool
 
-		plus                   bool
-		usageReportSkipVerify  bool
-		usageReportClusterName = stringValidatingValue{
-			validator: validateQualifiedName,
-		}
-		usageReportSecretName = namespacedNameValue{}
-		usageReportServerURL  = stringValidatingValue{
-			validator: validateURL,
-		}
-
 		snippetsFilters bool
+
+		plus                  bool
+		usageReportSkipVerify bool
+		usageReportSecretName = stringValidatingValue{
+			validator: validateResourceName,
+			value:     "nplus-license",
+		}
+		usageReportEndpoint = stringValidatingValue{
+			validator: validateEndpointOptionalPort,
+		}
+		usageReportResolver = stringValidatingValue{
+			validator: validateEndpointOptionalPort,
+		}
 	)
 
 	cmd := &cobra.Command{
@@ -188,16 +192,16 @@ func createStaticModeCommand() *cobra.Command {
 			}
 
 			var usageReportConfig *config.UsageReportConfig
-			if cmd.Flags().Changed(usageReportSecretFlag) {
-				if !plus {
-					return errors.New("usage-report arguments are only valid if using nginx-plus")
+			if plus {
+				if usageReportSecretName.value == "" {
+					return errors.New("usage-report-secret must be specified if using nginx plus")
 				}
 
 				usageReportConfig = &config.UsageReportConfig{
-					SecretNsName:       usageReportSecretName.value,
-					ServerURL:          usageReportServerURL.value,
-					ClusterDisplayName: usageReportClusterName.value,
-					InsecureSkipVerify: usageReportSkipVerify,
+					SecretName: usageReportSecretName.value,
+					Endpoint:   usageReportEndpoint.value,
+					Resolver:   usageReportResolver.value,
+					SkipVerify: usageReportSkipVerify,
 				}
 			}
 
@@ -378,21 +382,20 @@ func createStaticModeCommand() *cobra.Command {
 	cmd.Flags().Var(
 		&usageReportSecretName,
 		usageReportSecretFlag,
-		"The namespace/name of the Secret containing the credentials for NGINX Plus usage reporting.",
+		"The name of the Secret containing the JWT for NGINX Plus usage reporting. Must exist in the same namespace "+
+			"that the NGINX Gateway Fabric control plane is running in (default namespace: nginx-gateway).",
 	)
 
 	cmd.Flags().Var(
-		&usageReportServerURL,
-		usageReportServerURLFlag,
-		"The base server URL of the NGINX Plus usage reporting server.",
+		&usageReportEndpoint,
+		usageReportEndpointFlag,
+		"The endpoint of the NGINX Plus usage reporting server.",
 	)
 
-	cmd.MarkFlagsRequiredTogether(usageReportSecretFlag, usageReportServerURLFlag)
-
 	cmd.Flags().Var(
-		&usageReportClusterName,
-		usageReportClusterNameFlag,
-		"The display name of the Kubernetes cluster in the NGINX Plus usage reporting server.",
+		&usageReportResolver,
+		usageReportResolverFlag,
+		"The nameserver used to resolve the NGINX Plus usage reporting server name.",
 	)
 
 	cmd.Flags().BoolVar(
@@ -499,56 +502,67 @@ func createCopyCommand() *cobra.Command {
 	const srcFlag = "source"
 	const destFlag = "destination"
 	// flag values
-	var src, dest string
+	var srcFiles []string
+	var dest string
 
 	cmd := &cobra.Command{
 		Use:   "copy",
-		Short: "Copy a file to a destination",
+		Short: "Copy files to another directory",
 		RunE: func(_ *cobra.Command, _ []string) error {
-			if len(src) == 0 {
+			if len(srcFiles) == 0 {
 				return errors.New("source must not be empty")
 			}
 			if len(dest) == 0 {
 				return errors.New("destination must not be empty")
 			}
 
-			srcFile, err := os.Open(src)
-			if err != nil {
-				return fmt.Errorf("error opening source file: %w", err)
-			}
-			defer srcFile.Close()
-
-			destFile, err := os.Create(dest)
-			if err != nil {
-				return fmt.Errorf("error creating destination file: %w", err)
-			}
-			defer destFile.Close()
-
-			if _, err := io.Copy(destFile, srcFile); err != nil {
-				return fmt.Errorf("error copying file contents: %w", err)
+			for _, src := range srcFiles {
+				if err := copyFile(src, dest); err != nil {
+					return err
+				}
 			}
 
 			return nil
 		},
 	}
 
-	cmd.Flags().StringVar(
-		&src,
+	cmd.Flags().StringSliceVar(
+		&srcFiles,
 		srcFlag,
-		"",
-		"The source file to be copied",
+		[]string{},
+		"The source files to be copied",
 	)
 
 	cmd.Flags().StringVar(
 		&dest,
 		destFlag,
 		"",
-		"The destination for the source file to be copied to",
+		"The destination directory for the source files to be copied to",
 	)
 
 	cmd.MarkFlagsRequiredTogether(srcFlag, destFlag)
 
 	return cmd
+}
+
+func copyFile(src, dest string) error {
+	srcFile, err := os.Open(src)
+	if err != nil {
+		return fmt.Errorf("error opening source file: %w", err)
+	}
+	defer srcFile.Close()
+
+	destFile, err := os.Create(filepath.Join(dest, filepath.Base(src)))
+	if err != nil {
+		return fmt.Errorf("error creating destination file: %w", err)
+	}
+	defer destFile.Close()
+
+	if _, err := io.Copy(destFile, srcFile); err != nil {
+		return fmt.Errorf("error copying file contents: %w", err)
+	}
+
+	return nil
 }
 
 func parseFlags(flags *pflag.FlagSet) ([]string, []string) {

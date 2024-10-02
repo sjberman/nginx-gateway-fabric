@@ -80,6 +80,8 @@ type Graph struct {
 	GlobalSettings *policies.GlobalSettings
 	// SnippetsFilters holds all the SnippetsFilters.
 	SnippetsFilters map[types.NamespacedName]*SnippetsFilter
+	// PlusSecret holds the JWT for NGINX Plus licensing.
+	PlusSecret *v1.Secret
 }
 
 // ProtectedPorts are the ports that may not be configured by a listener with a descriptive name of each port.
@@ -90,7 +92,7 @@ func (g *Graph) IsReferenced(resourceType ngftypes.ObjectType, nsname types.Name
 	switch obj := resourceType.(type) {
 	case *v1.Secret:
 		_, exists := g.ReferencedSecrets[nsname]
-		return exists
+		return exists || (g.PlusSecret != nil && client.ObjectKeyFromObject(g.PlusSecret) == nsname)
 	case *v1.ConfigMap:
 		_, exists := g.ReferencedCaCertConfigMaps[nsname]
 		return exists
@@ -181,6 +183,7 @@ func BuildGraph(
 	state ClusterState,
 	controllerName string,
 	gcName string,
+	plusSecretName types.NamespacedName,
 	validators validation.Validators,
 	protectedPorts ProtectedPorts,
 ) *Graph {
@@ -269,6 +272,7 @@ func BuildGraph(
 		NGFPolicies:                processedPolicies,
 		GlobalSettings:             globalSettings,
 		SnippetsFilters:            processedSnippetsFilters,
+		PlusSecret:                 getSecret(state.Secrets, plusSecretName),
 	}
 
 	g.attachPolicies(controllerName)
@@ -292,4 +296,12 @@ func gatewayExists(
 	_, exists := ignored[gwNsName]
 
 	return exists
+}
+
+func getSecret(secrets map[types.NamespacedName]*v1.Secret, nsName types.NamespacedName) *v1.Secret {
+	if secret, ok := secrets[nsName]; ok {
+		return secret
+	}
+
+	return nil
 }

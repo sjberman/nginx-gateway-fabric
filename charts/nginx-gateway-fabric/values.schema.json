@@ -262,33 +262,33 @@
         "usage": {
           "description": "Configuration for NGINX Plus usage reporting.",
           "properties": {
-            "clusterName": {
+            "endpoint": {
               "default": "",
-              "description": "The display name of the Kubernetes cluster in the NGINX Plus usage reporting server.",
+              "description": "The endpoint of the NGINX Plus usage reporting server. Default: product.connect.nginx.com",
               "required": [],
-              "title": "clusterName",
+              "title": "endpoint",
               "type": "string"
             },
-            "insecureSkipVerify": {
-              "default": false,
-              "description": "Disable client verification of the NGINX Plus usage reporting server certificate.",
+            "resolver": {
+              "default": "",
+              "description": "The resolver domain name or IP address with optional port for resolving the endpoint.",
               "required": [],
-              "title": "insecureSkipVerify",
-              "type": "boolean"
+              "title": "resolver",
+              "type": "string"
             },
             "secretName": {
-              "default": "",
-              "description": "The namespace/name of the Secret containing the credentials for NGINX Plus usage reporting.",
+              "default": "nplus-license",
+              "description": "The name of the Secret containing the JWT for NGINX Plus usage reporting. Must exist in the same namespace\nthat the NGINX Gateway Fabric control plane is running in (default namespace: nginx-gateway).",
               "required": [],
               "title": "secretName",
               "type": "string"
             },
-            "serverURL": {
-              "default": "",
-              "description": "The base server URL of the NGINX Plus usage reporting server.",
+            "skipVerify": {
+              "default": false,
+              "description": "Disable client verification of the NGINX Plus usage reporting server certificate.",
               "required": [],
-              "title": "serverURL",
-              "type": "string"
+              "title": "skipVerify",
+              "type": "boolean"
             }
           },
           "required": [],

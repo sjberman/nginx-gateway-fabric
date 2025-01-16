@@ -7,6 +7,7 @@ import (
 	pb "github.com/nginx/agent/v3/api/grpc/mpi/v1"
 )
 
+// Messenger is a wrapper around a gRPC stream with the nginx agent.
 type Messenger struct {
 	incoming chan *pb.ManagementPlaneRequest
 	outgoing chan *pb.DataPlaneResponse
@@ -14,6 +15,7 @@ type Messenger struct {
 	server   pb.CommandService_SubscribeServer
 }
 
+// New returns a new Messenger instance.
 func New(server pb.CommandService_SubscribeServer) *Messenger {
 	return &Messenger{
 		incoming: make(chan *pb.ManagementPlaneRequest),
@@ -23,6 +25,7 @@ func New(server pb.CommandService_SubscribeServer) *Messenger {
 	}
 }
 
+// Run starts the Messenger to listen for any Send() or Recv() events over the stream.
 func (m *Messenger) Run(ctx context.Context) {
 	go m.handleRecv(ctx)
 	m.handleSend(ctx)

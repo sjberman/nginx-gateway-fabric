@@ -64,7 +64,16 @@ func NewNginxUpdater(
 }
 
 // UpdateConfig sends the nginx configuration to the agent.
-// Returns whether configuration was applied or not.
+// Returns whether the configuration was sent to any agents.
+//
+// The flow of events is as follows:
+// - Set the configuration files on the deployment.
+// - Broadcast the message containing file metadata to all pods (subscriptions) for the deployment.
+// - Agent receives a ConfigApplyRequest with the list of file metadata.
+// - Agent calls GetFile for each file in the list, which we send back to the agent.
+// - Agent updates nginx, and responds with a DataPlaneResponse.
+// - Subscriber responds back to the broadcaster to inform that the transaction is complete.
+// - If any errors occurred, they are set on the deployment for the handler to use in the status update.
 func (n *NginxUpdaterImpl) UpdateConfig(
 	deployment *Deployment,
 	files []File,
@@ -87,7 +96,7 @@ func (n *NginxUpdaterImpl) UpdateConfig(
 
 // UpdateUpstreamServers sends an APIRequest to the agent to update upstream servers using the NGINX Plus API.
 // Only applicable when using NGINX Plus.
-// Returns whether configuration was applied or not.
+// Returns whether the configuration was sent to any agents.
 func (n *NginxUpdaterImpl) UpdateUpstreamServers(
 	deployment *Deployment,
 	conf dataplane.Configuration,

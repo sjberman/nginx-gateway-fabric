@@ -19,12 +19,17 @@ type Broadcaster interface {
 	CancelSubscription(string)
 }
 
+// SubscriberChannels are the channels sent to the subscriber to listen and respond on.
+// The ID is used for map lookup to delete a subscriber when it's gone.
 type SubscriberChannels struct {
 	ListenCh   <-chan NginxAgentMessage
 	ResponseCh chan<- struct{}
 	ID         string
 }
 
+// storedChannels are the same channels used in the SubscriberChannels, but reverse direction.
+// These are used to store the channels for the broadcaster to send and listen on,
+// and can be looked up in the map using the same ID.
 type storedChannels struct {
 	listenCh   chan<- NginxAgentMessage
 	responseCh <-chan struct{}

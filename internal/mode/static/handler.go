@@ -110,8 +110,6 @@ type eventHandlerImpl struct {
 	// objectFilters contains all created objectFilters, with the key being a filterKey
 	objectFilters map[filterKey]objectFilter
 
-	// latestReloadResult status.NginxReloadResult
-
 	cfg  eventHandlerConfig
 	lock sync.Mutex
 

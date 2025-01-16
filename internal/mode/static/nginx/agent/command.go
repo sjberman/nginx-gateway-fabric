@@ -105,6 +105,13 @@ func (cs *commandService) CreateConnection(
 }
 
 // Subscribe is a decoupled communication mechanism between the data plane agent and control plane.
+// The series of events are as follows:
+// - Wait for the agent to register its nginx instance with the control plane.
+// - Grab the most recent deployment configuration for itself, and attempt to apply it.
+// - Subscribe to any future updates from the NginxUpdater and start a loop to listen for those updates.
+// If any connection or unrecoverable errors occur, return and agent should re-establish a subscription.
+// If errors occur with applying the config, log and put those errors into the status queue to be written
+// to the Gateway status.
 func (cs *commandService) Subscribe(in pb.CommandService_SubscribeServer) error {
 	ctx := in.Context()
 
@@ -238,6 +245,8 @@ func (cs *commandService) setInitialConfig(
 		return connErr
 	}
 
+	// TODO(sberman): without a delay, sometimes the following API request will fail because it doesn't
+	// think the upstreams exist yet. Have to figure this one out.
 	time.Sleep(1 * time.Second)
 
 	var upstreamErr error

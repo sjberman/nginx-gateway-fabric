@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -11,38 +12,59 @@ import (
 
 	"github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/nginx/agent/broadcast"
 	agentgrpc "github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/nginx/agent/grpc"
-	"github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/nginx/agent/hack"
 )
 
+// ignoreFiles is a list of static or base files that live in the
+// nginx container that should not be touched by the agent. Any files
+// that we add directly into the container should be added here.
+var ignoreFiles = []string{
+	"/etc/nginx/nginx.conf",
+	"/etc/nginx/mime.types",
+	"/etc/nginx/grpc-error-locations.conf",
+	"/etc/nginx/grpc-error-pages.conf",
+	"/usr/share/nginx/html/50x.html",
+	"/usr/share/nginx/html/dashboard.html",
+	"/usr/share/nginx/html/index.html",
+	"/usr/share/nginx/html/nginx-modules-reference.pdf",
+}
+
+const fileMode = "0644"
+
 // Deployment represents an nginx Deployment. It contains its own nginx configuration files,
-// and a broadcaster for sending those files to all of its pods that are subscribed.
+// a broadcaster for sending those files to all of its pods that are subscribed, and errors
+// that may have occurred while applying configuration.
 type Deployment struct {
+	// podStatuses is a map of all Pods for this Deployment and the most recent error
+	// (or nil if successful) that occurred on a config call to the nginx agent.
+	podStatuses map[string]error
+
 	broadcaster broadcast.Broadcaster
 
-	configVersion    string
+	configVersion string
+	// error that is set if a ConfigApply call failed for a Pod. This is needed
+	// because if subsequent upstream API calls are made within the same update event,
+	// and are successful, the previous error would be lost in the podStatuses map.
+	// It's used to preserve the error for when we write status after fully updating nginx.
+	latestConfigError error
+	// error that is set when at least one upstream API call failed for a Pod.
+	// This is needed because subsequent API calls within the same update event could succeed,
+	// and therefore the previous error would be lost in the podStatuses map. It's used to preserve
+	// the error for when we write status after fully updating nginx.
+	latestUpstreamError error
+
 	nginxPlusActions []*pb.NGINXPlusAction
 	fileOverviews    []*pb.File
 	files            []File
 
-	lock sync.RWMutex
+	Lock sync.RWMutex
 }
 
 // newDeployment returns a new deployment object.
 func newDeployment(ctx context.Context) *Deployment {
 	return &Deployment{
 		broadcaster: broadcast.NewDeploymentBroadcaster(ctx),
+		podStatuses: make(map[string]error),
 	}
-}
-
-// RLock locks the deployment for reading. Used by the Subscriber to lock the deployment from any file
-// changes while updating agent.
-func (d *Deployment) RLock() {
-	d.lock.RLock()
-}
-
-// RUnlock unlocks the deployment from reading.
-func (d *Deployment) RUnlock() {
-	d.lock.RUnlock()
 }
 
 // GetBroadcaster returns the deployment's broadcaster.
@@ -52,25 +74,46 @@ func (d *Deployment) GetBroadcaster() broadcast.Broadcaster {
 
 // GetFileOverviews returns the current list of fileOverviews and configVersion for the deployment.
 func (d *Deployment) GetFileOverviews() ([]*pb.File, string) {
-	d.lock.RLock()
-	defer d.lock.RUnlock()
+	d.Lock.RLock()
+	defer d.Lock.RUnlock()
 
 	return d.fileOverviews, d.configVersion
 }
 
 // GetNGINXPlusActions returns the current NGINX Plus API Actions for the deployment.
 func (d *Deployment) GetNGINXPlusActions() []*pb.NGINXPlusAction {
-	d.lock.RLock()
-	defer d.lock.RUnlock()
+	d.Lock.RLock()
+	defer d.Lock.RUnlock()
 
 	return d.nginxPlusActions
 }
 
+// GetLatestConfigError gets the latest config apply error for the deployment.
+func (d *Deployment) GetLatestConfigError() error {
+	d.Lock.RLock()
+	defer d.Lock.RUnlock()
+
+	return d.latestConfigError
+}
+
+// GetLatestUpstreamError gets the latest upstream update error for the deployment.
+func (d *Deployment) GetLatestUpstreamError() error {
+	d.Lock.RLock()
+	defer d.Lock.RUnlock()
+
+	return d.latestUpstreamError
+}
+
+/*
+The following functions for the Deployment object are UNLOCKED, meaning that they are unsafe.
+Callers of these functions MUST ensure the lock is set before calling.
+
+These functions are called as part of the ConfigApply or APIRequest processes. These entire processes
+are locked by the caller, hence why the functions themselves do not set the locks.
+*/
+
 // GetFile gets the requested file for the deployment and returns its contents.
-// This function MUST only be called after Deployment.Lock() has been called.
-// This function is called by the agent during a ConfigApplyRequest transaction.
-// Since the Deployment must be locked for the duration of the transaction,
-// the Subscriber Locks and Unlocks the Deployment.
+// Caller MUST lock the deployment before calling this function.
 func (d *Deployment) GetFile(name, hash string) []byte {
 	for _, file := range d.files {
 		if name == file.Meta.GetName() && hash == file.Meta.GetHash() {
@@ -82,10 +125,8 @@ func (d *Deployment) GetFile(name, hash string) []byte {
 }
 
 // SetFiles updates the nginx files and fileOverviews for the deployment and returns the message to send.
+// Caller MUST lock the deployment before calling this function.
 func (d *Deployment) SetFiles(files []File) broadcast.NginxAgentMessage {
-	d.lock.Lock()
-	defer d.lock.Unlock()
-
 	d.files = files
 
 	fileOverviews := make([]*pb.File, 0, len(files))
@@ -93,20 +134,17 @@ func (d *Deployment) SetFiles(files []File) broadcast.NginxAgentMessage {
 		fileOverviews = append(fileOverviews, &pb.File{FileMeta: file.Meta})
 	}
 
-	// hack to include unchanging static files in the payload so they don't get deleted
-	staticFiles := hack.GetStaticFiles()
-	for _, file := range staticFiles {
+	// add ignored files to the overview as 'unmanaged' so agent doesn't touch them
+	for _, f := range ignoreFiles {
 		meta := &pb.FileMeta{
-			Name:        file.Name,
-			Hash:        filesHelper.GenerateHash(file.Contents),
-			Permissions: file.Permissions,
+			Name:        f,
+			Permissions: fileMode,
 		}
 
 		fileOverviews = append(fileOverviews, &pb.File{
-			FileMeta: meta,
+			FileMeta:  meta,
+			Unmanaged: true,
 		})
-
-		d.files = append(d.files, File{Meta: meta, Contents: file.Contents})
 	}
 
 	d.configVersion = filesHelper.GenerateConfigVersion(fileOverviews)
@@ -121,31 +159,58 @@ func (d *Deployment) SetFiles(files []File) broadcast.NginxAgentMessage {
 
 // SetNGINXPlusActions updates the deployment's latest NGINX Plus Actions to perform if using NGINX Plus.
 // Used by a Subscriber when it first connects.
+// Caller MUST lock the deployment before calling this function.
 func (d *Deployment) SetNGINXPlusActions(actions []*pb.NGINXPlusAction) {
-	d.lock.Lock()
-	defer d.lock.Unlock()
-
 	d.nginxPlusActions = actions
+}
+
+// SetPodErrorStatus sets the error status of a Pod in this Deployment if applying the config failed.
+func (d *Deployment) SetPodErrorStatus(pod string, err error) {
+	d.podStatuses[pod] = err
+}
+
+// SetLatestConfigError sets the latest config apply error for the deployment.
+// Caller MUST lock the deployment before calling this function.
+func (d *Deployment) SetLatestConfigError(err error) {
+	d.latestConfigError = err
+}
+
+// SetLatestUpstreamError sets the latest upstream update error for the deployment.
+// Caller MUST lock the deployment before calling this function.
+func (d *Deployment) SetLatestUpstreamError(err error) {
+	d.latestUpstreamError = err
+}
+
+// GetConfigurationStatus returns the current config status for this Deployment. It combines
+// the most recent errors (if they exist) for all Pods in the Deployment into a single error.
+// Caller MUST lock the deployment before calling this function.
+func (d *Deployment) GetConfigurationStatus() error {
+	var err error
+	for _, statusErr := range d.podStatuses {
+		err = errors.Join(err, statusErr)
+	}
+
+	return err
 }
 
 // DeploymentStore holds a map of all Deployments.
 type DeploymentStore struct {
-	connTracker *agentgrpc.ConnectionsTracker
+	connTracker agentgrpc.AgentConnectionsTracker
 	deployments sync.Map
 }
 
 // NewDeploymentStore returns a new instance of a DeploymentStore.
-func NewDeploymentStore(connTracker *agentgrpc.ConnectionsTracker) *DeploymentStore {
+func NewDeploymentStore(connTracker agentgrpc.AgentConnectionsTracker) *DeploymentStore {
 	return &DeploymentStore{
 		connTracker: connTracker,
 	}
 }
 
 // Get returns the desired deployment from the store.
-func (d *DeploymentStore) Get(nsName types.NamespacedName) (*Deployment, bool) {
+func (d *DeploymentStore) Get(nsName types.NamespacedName) *Deployment {
 	val, ok := d.deployments.Load(nsName)
 	if !ok {
-		return nil, false
+		return nil
 	}
 
 	deployment, ok := val.(*Deployment)
@@ -153,13 +218,13 @@ func (d *DeploymentStore) Get(nsName types.NamespacedName) (*Deployment, bool) {
 		panic(fmt.Sprintf("expected Deployment, got type %T", val))
 	}
 
-	return deployment, true
+	return deployment
 }
 
 // GetOrStore returns the existing value for the key if present.
 // Otherwise, it stores and returns the given value.
 func (d *DeploymentStore) GetOrStore(ctx context.Context, nsName types.NamespacedName) *Deployment {
-	if deployment, ok := d.Get(nsName); ok {
+	if deployment := d.Get(nsName); deployment != nil {
 		return deployment
 	}
 

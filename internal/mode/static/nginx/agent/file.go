@@ -24,7 +24,7 @@ type File struct {
 type fileService struct {
 	pb.FileServiceServer
 	nginxDeployments *DeploymentStore
-	connTracker      *agentgrpc.ConnectionsTracker
+	connTracker      agentgrpc.AgentConnectionsTracker
 	// TODO(sberman): all logs are at Info level right now. Adjust appropriately.
 	logger logr.Logger
 }
@@ -32,7 +32,7 @@ type fileService struct {
 func newFileService(
 	logger logr.Logger,
 	depStore *DeploymentStore,
-	connTracker *agentgrpc.ConnectionsTracker,
+	connTracker agentgrpc.AgentConnectionsTracker,
 ) *fileService {
 	return &fileService{
 		logger:           logger,
@@ -72,8 +72,8 @@ func (fs *fileService) GetFile(
 		return nil, status.Errorf(codes.NotFound, "connection not found")
 	}
 
-	deployment, ok := fs.nginxDeployments.Get(conn.Parent)
-	if !ok {
+	deployment := fs.nginxDeployments.Get(conn.Parent)
+	if deployment == nil {
 		return nil, status.Errorf(codes.NotFound, "deployment not found in store")
 	}
 

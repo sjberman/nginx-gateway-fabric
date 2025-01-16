@@ -2,7 +2,6 @@ package broadcast
 
 import (
 	"context"
-	"errors"
 	"sync"
 
 	pb "github.com/nginx/agent/v3/api/grpc/mpi/v1"
@@ -16,19 +15,19 @@ import (
 // Broadcaster defines an interface for consumers to subscribe to File updates.
 type Broadcaster interface {
 	Subscribe() SubscriberChannels
-	Send(NginxAgentMessage) (bool, error)
+	Send(NginxAgentMessage) bool
 	CancelSubscription(string)
 }
 
 type SubscriberChannels struct {
 	ListenCh   <-chan NginxAgentMessage
-	ResponseCh chan<- error
+	ResponseCh chan<- struct{}
 	ID         string
 }
 
 type storedChannels struct {
 	listenCh   chan<- NginxAgentMessage
-	responseCh <-chan error
+	responseCh <-chan struct{}
 	id         string
 }
 
@@ -41,7 +40,7 @@ type DeploymentBroadcaster struct {
 	subCh     chan storedChannels
 	unsubCh   chan string
 	listeners map[string]storedChannels
-	errorCh   chan error
+	doneCh    chan struct{}
 }
 
 // NewDeploymentBroadcaster returns a new instance of a DeploymentBroadcaster.
@@ -51,7 +50,7 @@ func NewDeploymentBroadcaster(ctx context.Context) *DeploymentBroadcaster {
 		publishCh: make(chan NginxAgentMessage),
 		subCh:     make(chan storedChannels),
 		unsubCh:   make(chan string),
-		errorCh:   make(chan error),
+		doneCh:    make(chan struct{}),
 	}
 	go broadcaster.run(ctx)
 
@@ -62,7 +61,7 @@ func NewDeploymentBroadcaster(ctx context.Context) *DeploymentBroadcaster {
 // to listen on for messages, as well as a channel to respond on.
 func (b *DeploymentBroadcaster) Subscribe() SubscriberChannels {
 	listenCh := make(chan NginxAgentMessage)
-	responseCh := make(chan error)
+	responseCh := make(chan struct{})
 	id := string(uuid.NewUUID())
 
 	subscriberChans := SubscriberChannels{
@@ -81,12 +80,12 @@ func (b *DeploymentBroadcaster) Subscribe() SubscriberChannels {
 }
 
 // Send the message to all listeners. Wait for all listeners to respond.
-// Returns true if there were listeners that received the message, and returns any
-// responses (nil for success, error for failure).
-func (b *DeploymentBroadcaster) Send(message NginxAgentMessage) (bool, error) {
+// Returns true if there were listeners that received the message.
+func (b *DeploymentBroadcaster) Send(message NginxAgentMessage) bool {
 	b.publishCh <- message
+	<-b.doneCh
 
-	return len(b.listeners) > 0, <-b.errorCh
+	return len(b.listeners) > 0
 }
 
 // CancelSubscription removes a Subscriber from the channel list.
@@ -112,7 +111,6 @@ func (b *DeploymentBroadcaster) run(ctx context.Context) {
 			var wg sync.WaitGroup
 			wg.Add(len(b.listeners))
 
-			responses := make(chan error, len(b.listeners))
 			for _, channels := range b.listeners {
 				go func() {
 					defer wg.Done()
@@ -120,18 +118,12 @@ func (b *DeploymentBroadcaster) run(ctx context.Context) {
 					// send message and wait for it to be read
 					channels.listenCh <- msg
 					// wait for response
-					res := <-channels.responseCh
-					// add response to the list of responses
-					responses <- res
+					<-channels.responseCh
 				}()
 			}
 			wg.Wait()
 
-			var err error
-			for range len(b.listeners) {
-				err = errors.Join(err, <-responses)
-			}
-			b.errorCh <- err
+			b.doneCh <- struct{}{}
 		}
 	}
 }

@@ -4,14 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
+	"io"
 	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/google/uuid"
 	pb "github.com/nginx/agent/v3/api/grpc/mpi/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
+	grpcStatus "google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
@@ -22,14 +23,16 @@ import (
 	"github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/nginx/agent/broadcast"
 	agentgrpc "github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/nginx/agent/grpc"
 	grpcContext "github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/nginx/agent/grpc/context"
-	"github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/nginx/agent/meta"
+	"github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/nginx/agent/grpc/messenger"
+	"github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/status"
 )
 
 // commandService handles the connection and subscription to the data plane agent.
 type commandService struct {
 	pb.CommandServiceServer
 	nginxDeployments *DeploymentStore
-	connTracker      *agentgrpc.ConnectionsTracker
+	connTracker      agentgrpc.AgentConnectionsTracker
+	statusQueue      *status.Queue
 	k8sReader        client.Reader
 	// TODO(sberman): all logs are at Info level right now. Adjust appropriately.
 	logger logr.Logger
@@ -39,13 +42,15 @@ func newCommandService(
 	logger logr.Logger,
 	reader client.Reader,
 	depStore *DeploymentStore,
-	connTracker *agentgrpc.ConnectionsTracker,
+	connTracker agentgrpc.AgentConnectionsTracker,
+	statusQueue *status.Queue,
 ) *commandService {
 	return &commandService{
 		k8sReader:        reader,
 		logger:           logger,
 		connTracker:      connTracker,
 		nginxDeployments: depStore,
+		statusQueue:      statusQueue,
 	}
 }
 
@@ -82,7 +87,7 @@ func (cs *commandService) CreateConnection(
 				Error:   err.Error(),
 			},
 		}
-		return response, status.Errorf(codes.Internal, "error getting pod owner %s", err.Error())
+		return response, grpcStatus.Errorf(codes.Internal, "error getting pod owner %s", err.Error())
 	}
 
 	conn := agentgrpc.Connection{
@@ -108,8 +113,6 @@ func (cs *commandService) Subscribe(in pb.CommandService_SubscribeServer) error 
 		return agentgrpc.ErrStatusInvalidConnection
 	}
 
-	cs.logger.Info(fmt.Sprintf("Received subscribe request from %q", gi.IPAddress))
-
 	// wait for the agent to report itself and nginx
 	conn, deployment, err := cs.waitForConnection(ctx, gi)
 	if err != nil {
@@ -117,39 +120,30 @@ func (cs *commandService) Subscribe(in pb.CommandService_SubscribeServer) error 
 		return err
 	}
 
-	// apply current config before starting listen loop
-	deployment.RLock()
-	fileOverviews, configVersion := deployment.GetFileOverviews()
-	if err = in.Send(buildRequest(fileOverviews, conn.InstanceID, configVersion)); err != nil {
-		fmt.Printf("ERROR applying initial config: %v\n", err)
-		// TODO(sberman): how do we write this status?
-	}
+	cs.logger.Info(fmt.Sprintf("Successfully connected to nginx agent %s", conn.PodName))
 
-	for _, action := range deployment.GetNGINXPlusActions() {
-		if err := in.Send(buildPlusAPIRequest(action, conn.InstanceID)); err != nil {
-			fmt.Printf("ERROR applying initial API config: %v\n", err)
-			// TODO(sberman): how do we write this status?
-		}
-	}
-	deployment.RUnlock()
+	msgr := messenger.New(in)
+	go msgr.Run(ctx)
 
-	if err == nil {
-		cs.logger.Info(fmt.Sprintf("Successfully configured nginx for new subscription %q", conn.PodName))
+	// apply current config before starting event loop
+	deployment.Lock.RLock()
+	if err := cs.setInitialConfig(ctx, deployment, conn, msgr); err != nil {
+		deployment.Lock.RUnlock()
+
+		return err
 	}
 
 	// subscribe to the deployment broadcaster to get file updates
 	broadcaster := deployment.GetBroadcaster()
 	channels := broadcaster.Subscribe()
 	defer broadcaster.CancelSubscription(channels.ID)
-
-	go cs.listenForDataPlaneResponse(ctx, in, channels.ResponseCh)
+	deployment.Lock.RUnlock()
 
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return grpcStatus.Error(codes.Canceled, context.Cause(ctx).Error())
 		case msg := <-channels.ListenCh:
-			deployment.RLock()
 			var req *pb.ManagementPlaneRequest
 			switch msg.Type {
 			case broadcast.ConfigApplyRequest:
@@ -160,14 +154,28 @@ func (cs *commandService) Subscribe(in pb.CommandService_SubscribeServer) error 
 				panic(fmt.Sprintf("unknown request type %d", msg.Type))
 			}
 
-			if err := in.Send(req); err != nil {
-				deployment.RUnlock()
+			if err := msgr.Send(ctx, req); err != nil {
 				cs.logger.Error(err, "error sending request to agent")
-				channels.ResponseCh <- err
+				deployment.SetPodErrorStatus(conn.PodName, err)
+				channels.ResponseCh <- struct{}{}
 
-				return err
+				return grpcStatus.Error(codes.Internal, err.Error())
 			}
-			deployment.RUnlock()
+		case err = <-msgr.Errors():
+			cs.logger.Error(err, "connection error")
+			if errors.Is(err, io.EOF) {
+				return grpcStatus.Error(codes.Aborted, err.Error())
+			}
+			return grpcStatus.Error(codes.Internal, err.Error())
+		case msg := <-msgr.Messages():
+			res := msg.GetCommandResponse()
+			if res.GetStatus() != pb.CommandResponse_COMMAND_STATUS_OK {
+				err := fmt.Errorf("bad response from agent: msg: %s; error: %s", res.GetMessage(), res.GetError())
+				deployment.SetPodErrorStatus(conn.PodName, err)
+			} else {
+				deployment.SetPodErrorStatus(conn.PodName, nil)
+			}
+			channels.ResponseCh <- struct{}{}
 		}
 	}
 }
@@ -197,7 +205,7 @@ func (cs *commandService) waitForConnection(
 		case <-ticker.C:
 			if conn, ok := cs.connTracker.ConnectionIsReady(gi.IPAddress); ok {
 				// connection has been established, now ensure that the deployment exists in the store
-				if deployment, ok := cs.nginxDeployments.Get(conn.Parent); ok {
+				if deployment := cs.nginxDeployments.Get(conn.Parent); deployment != nil {
 					return &conn, deployment, nil
 				}
 				err = deploymentStoreErr
@@ -208,38 +216,109 @@ func (cs *commandService) waitForConnection(
 	}
 }
 
-func (cs *commandService) listenForDataPlaneResponse(
+// setInitialConfig gets the initial configuration for this connection and applies it.
+// The caller MUST lock the deployment before calling this.
+func (cs *commandService) setInitialConfig(
 	ctx context.Context,
-	in pb.CommandService_SubscribeServer,
-	responseCh chan<- error,
-) {
+	deployment *Deployment,
+	conn *agentgrpc.Connection,
+	msgr *messenger.Messenger,
+) error {
+	fileOverviews, configVersion := deployment.GetFileOverviews()
+	if err := msgr.Send(ctx, buildRequest(fileOverviews, conn.InstanceID, configVersion)); err != nil {
+		cs.logAndSendErrorStatus(deployment, conn, err)
+
+		return grpcStatus.Error(codes.Internal, err.Error())
+	}
+
+	applyErr, connErr := cs.waitForInitialConfigApply(ctx, msgr)
+	if connErr != nil {
+		cs.logger.Error(connErr, "error setting initial configuration")
+
+		return connErr
+	}
+
+	time.Sleep(1 * time.Second)
+
+	var upstreamErr error
+	for _, action := range deployment.GetNGINXPlusActions() {
+		if err := msgr.Send(ctx, buildPlusAPIRequest(action, conn.InstanceID)); err != nil {
+			cs.logAndSendErrorStatus(deployment, conn, err)
+
+			return grpcStatus.Error(codes.Internal, err.Error())
+		}
+
+		upstreamApplyErr, connErr := cs.waitForInitialConfigApply(ctx, msgr)
+		if connErr != nil {
+			cs.logger.Error(connErr, "error setting initial configuration")
+
+			return connErr
+		}
+
+		upstreamErr = errors.Join(upstreamErr, upstreamApplyErr)
+	}
+	// send the status (error or nil) to the status queue
+	cs.logAndSendErrorStatus(deployment, conn, errors.Join(applyErr, upstreamErr))
+
+	return nil
+}
+
+// waitForInitialConfigApply waits for the nginx agent to respond after a Subscriber attempts
+// to apply its initial config.
+// Two errors are returned
+// - applyErr is an error applying the configuration
+// - connectionErr is an error with the connection or sending the configuration
+// The caller treats a connectionErr as unrecoverable, while the applyErr is used
+// to set the status on the Gateway resources.
+func (cs *commandService) waitForInitialConfigApply(
+	ctx context.Context,
+	msgr *messenger.Messenger,
+) (applyErr error, connectionErr error) {
 	for {
 		select {
 		case <-ctx.Done():
-			return
-		default:
-			dataPlaneResponse, err := in.Recv()
-			if err != nil && !strings.Contains(err.Error(), "context canceled") {
-				cs.logger.Error(err, "failed to receive data plane response")
-				return
+			return nil, grpcStatus.Error(codes.Canceled, context.Cause(ctx).Error())
+		case err := <-msgr.Errors():
+			if errors.Is(err, io.EOF) {
+				return nil, grpcStatus.Error(codes.Aborted, err.Error())
+			}
+			return nil, grpcStatus.Error(codes.Internal, err.Error())
+		case msg := <-msgr.Messages():
+			res := msg.GetCommandResponse()
+			if res.GetStatus() != pb.CommandResponse_COMMAND_STATUS_OK {
+				applyErr := fmt.Errorf("bad response from agent: msg: %s; error: %s", res.GetMessage(), res.GetError())
+				return applyErr, nil
 			}
 
-			res := dataPlaneResponse.GetCommandResponse()
-			if res.GetStatus() != pb.CommandResponse_COMMAND_STATUS_OK {
-				err := fmt.Errorf("bad response from agent: %s; error: %s", res.GetMessage(), res.GetError())
-				responseCh <- err
-			} else {
-				responseCh <- nil
-			}
+			return applyErr, connectionErr
 		}
 	}
+}
+
+// logAndSendErrorStatus logs an error, sets it on the Deployment object for that Pod, and then sends
+// the full Deployment error status to the status queue. This ensures that any other Pod errors that already
+// exist on the Deployment are not overwritten.
+// If the error is nil, then we just enqueue the nil value and don't log it, which indicates success.
+func (cs *commandService) logAndSendErrorStatus(deployment *Deployment, conn *agentgrpc.Connection, err error) {
+	if err != nil {
+		cs.logger.Error(err, "error sending request to agent")
+	} else {
+		cs.logger.Info(fmt.Sprintf("Successfully configured nginx for new subscription %q", conn.PodName))
+	}
+	deployment.SetPodErrorStatus(conn.PodName, err)
+
+	queueObj := &status.QueueObject{
+		Deployment: conn.Parent,
+		Error:      deployment.GetConfigurationStatus(),
+	}
+	cs.statusQueue.Enqueue(queueObj)
 }
 
 func buildRequest(fileOverviews []*pb.File, instanceID, version string) *pb.ManagementPlaneRequest {
 	return &pb.ManagementPlaneRequest{
 		MessageMeta: &pb.MessageMeta{
-			MessageId:     meta.GenerateMessageID(),
-			CorrelationId: meta.GenerateMessageID(),
+			MessageId:     uuid.NewString(),
+			CorrelationId: uuid.NewString(),
 			Timestamp:     timestamppb.Now(),
 		},
 		Request: &pb.ManagementPlaneRequest_ConfigApplyRequest{
@@ -259,8 +338,8 @@ func buildRequest(fileOverviews []*pb.File, instanceID, version string) *pb.Mana
 func buildPlusAPIRequest(action *pb.NGINXPlusAction, instanceID string) *pb.ManagementPlaneRequest {
 	return &pb.ManagementPlaneRequest{
 		MessageMeta: &pb.MessageMeta{
-			MessageId:     meta.GenerateMessageID(),
-			CorrelationId: meta.GenerateMessageID(),
+			MessageId:     uuid.NewString(),
+			CorrelationId: uuid.NewString(),
 			Timestamp:     timestamppb.Now(),
 		},
 		Request: &pb.ManagementPlaneRequest_ActionRequest{
@@ -346,7 +425,7 @@ func (cs *commandService) UpdateDataPlaneStatus(
 
 	instanceID := getNginxInstanceID(req.GetResource().GetInstances())
 	if instanceID == "" {
-		return nil, status.Errorf(codes.InvalidArgument, "request does not contain nginx instanceID")
+		return nil, grpcStatus.Errorf(codes.InvalidArgument, "request does not contain nginx instanceID")
 	}
 
 	cs.connTracker.SetInstanceID(gi.IPAddress, instanceID)

@@ -1,20 +1,19 @@
 package agent
 
 import (
-	"context"
 	"errors"
 	"fmt"
 
 	"github.com/go-logr/logr"
 	pb "github.com/nginx/agent/v3/api/grpc/mpi/v1"
 	"google.golang.org/protobuf/types/known/structpb"
-	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/nginx/agent/broadcast"
 	agentgrpc "github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/nginx/agent/grpc"
 	"github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/state/dataplane"
 	"github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/state/resolver"
+	"github.com/nginxinc/nginx-gateway-fabric/internal/mode/static/status"
 )
 
 //go:generate go run github.com/maxbrunsfeld/counterfeiter/v6 -generate
@@ -23,23 +22,15 @@ import (
 
 // NginxUpdater is an interface for updating NGINX using the NGINX agent.
 type NginxUpdater interface {
-	UpdateConfig(
-		ctx context.Context,
-		deploymentNsName types.NamespacedName,
-		files []File,
-	) (bool, error)
-	UpdateUpstreamServers(
-		ctx context.Context,
-		deploymentNsName types.NamespacedName,
-		conf dataplane.Configuration,
-	) (bool, error)
+	UpdateConfig(deployment *Deployment, files []File) bool
+	UpdateUpstreamServers(deployment *Deployment, conf dataplane.Configuration) bool
 }
 
 // NginxUpdaterImpl implements the NginxUpdater interface.
 type NginxUpdaterImpl struct {
 	CommandService   *commandService
 	FileService      *fileService
-	nginxDeployments *DeploymentStore
+	NginxDeployments *DeploymentStore
 	logger           logr.Logger
 	plus             bool
 }
@@ -48,72 +39,76 @@ type NginxUpdaterImpl struct {
 func NewNginxUpdater(
 	logger logr.Logger,
 	reader client.Reader,
+	statusQueue *status.Queue,
 	plus bool,
 ) *NginxUpdaterImpl {
 	connTracker := agentgrpc.NewConnectionsTracker()
 	nginxDeployments := NewDeploymentStore(connTracker)
 
-	commandService := newCommandService(logger.WithName("commandService"), reader, nginxDeployments, connTracker)
+	commandService := newCommandService(
+		logger.WithName("commandService"),
+		reader,
+		nginxDeployments,
+		connTracker,
+		statusQueue,
+	)
 	fileService := newFileService(logger.WithName("fileService"), nginxDeployments, connTracker)
 
 	return &NginxUpdaterImpl{
 		logger:           logger,
 		plus:             plus,
-		nginxDeployments: nginxDeployments,
+		NginxDeployments: nginxDeployments,
 		CommandService:   commandService,
 		FileService:      fileService,
 	}
 }
 
 // UpdateConfig sends the nginx configuration to the agent.
-// Returns whether configuration was applied or not, and any error that occurred.
-func (n *NginxUpdaterImpl) UpdateConfig(ctx context.Context, nsName types.NamespacedName, files []File) (bool, error) {
+// Returns whether configuration was applied or not.
+func (n *NginxUpdaterImpl) UpdateConfig(
+	deployment *Deployment,
+	files []File,
+) bool {
 	n.logger.Info("Sending nginx configuration to agent")
 
-	deployment := n.nginxDeployments.GetOrStore(ctx, nsName)
-	if deployment == nil {
-		return false, fmt.Errorf("failed to register nginx deployment %q", nsName.Name)
-	}
-
-	// TODO(sberman): wait to send config until Deployment pods have all connected.
-	// If an nginx Pod creation event triggered this update, then we should include that
-	// pod name in the call to this function. Then we can wait for the DeploymentStore
-	// to show that this Pod has connected, and proceed with sending the config.
+	// reset the latest error to nil now that we're applying new config
+	deployment.SetLatestConfigError(nil)
 
 	msg := deployment.SetFiles(files)
+	applied := deployment.GetBroadcaster().Send(msg)
 
-	applied, err := deployment.GetBroadcaster().Send(msg)
-	if err != nil {
-		return false, fmt.Errorf("could not set nginx files: %w", err)
+	latestStatus := deployment.GetConfigurationStatus()
+	if latestStatus != nil {
+		deployment.SetLatestConfigError(latestStatus)
 	}
 
-	return applied, nil
+	return applied
 }
 
 // UpdateUpstreamServers sends an APIRequest to the agent to update upstream servers using the NGINX Plus API.
 // Only applicable when using NGINX Plus.
-// Returns whether configuration was applied or not, and any error that occurred.
+// Returns whether configuration was applied or not.
 func (n *NginxUpdaterImpl) UpdateUpstreamServers(
-	ctx context.Context,
-	nsName types.NamespacedName,
+	deployment *Deployment,
 	conf dataplane.Configuration,
-) (bool, error) {
+) bool {
 	if !n.plus {
-		return false, nil
+		return false
 	}
 
-	n.logger.Info("Updating upstream servers using NGINX Plus API")
-
-	deployment := n.nginxDeployments.GetOrStore(ctx, nsName)
-	if deployment == nil {
-		return false, fmt.Errorf("failed to register nginx deployment %q", nsName.Name)
-	}
 	broadcaster := deployment.GetBroadcaster()
+
+	// reset the latest error to nil now that we're applying new config
+	deployment.SetLatestUpstreamError(nil)
 
 	var updateErr error
 	var applied bool
 	actions := make([]*pb.NGINXPlusAction, 0, len(conf.Upstreams))
 	for _, upstream := range conf.Upstreams {
+		if len(upstream.Endpoints) == 0 {
+			continue
+		}
+
 		action := &pb.NGINXPlusAction{
 			Action: &pb.NGINXPlusAction_UpdateHttpUpstreamServers{
 				UpdateHttpUpstreamServers: buildUpstreamServers(upstream),
@@ -126,17 +121,25 @@ func (n *NginxUpdaterImpl) UpdateUpstreamServers(
 			NGINXPlusAction: action,
 		}
 
-		var err error
-		applied, err = broadcaster.Send(msg)
-		if err != nil {
+		applied = broadcaster.Send(msg)
+		if err := deployment.GetConfigurationStatus(); err != nil {
 			updateErr = errors.Join(updateErr, fmt.Errorf(
 				"couldn't update upstream %q via the API: %w", upstream.Name, err))
 		}
 	}
+
+	if updateErr != nil {
+		deployment.SetLatestUpstreamError(updateErr)
+	}
+
+	if applied {
+		n.logger.Info("Updated upstream servers using NGINX Plus API")
+	}
+
 	// Store the most recent actions on the deployment so any new subscribers can apply them when first connecting.
 	deployment.SetNGINXPlusActions(actions)
 
-	return applied, updateErr
+	return applied
 }
 
 func buildUpstreamServers(upstream dataplane.Upstream) *pb.UpdateHTTPUpstreamServers {

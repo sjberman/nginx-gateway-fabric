@@ -13,18 +13,16 @@ type FakeBroadcaster struct {
 	cancelSubscriptionArgsForCall []struct {
 		arg1 string
 	}
-	SendStub        func(broadcast.NginxAgentMessage) (bool, error)
+	SendStub        func(broadcast.NginxAgentMessage) bool
 	sendMutex       sync.RWMutex
 	sendArgsForCall []struct {
 		arg1 broadcast.NginxAgentMessage
 	}
 	sendReturns struct {
 		result1 bool
-		result2 error
 	}
 	sendReturnsOnCall map[int]struct {
 		result1 bool
-		result2 error
 	}
 	SubscribeStub        func() broadcast.SubscriberChannels
 	subscribeMutex       sync.RWMutex
@@ -72,7 +70,7 @@ func (fake *FakeBroadcaster) CancelSubscriptionArgsForCall(i int) string {
 	return argsForCall.arg1
 }
 
-func (fake *FakeBroadcaster) Send(arg1 broadcast.NginxAgentMessage) (bool, error) {
+func (fake *FakeBroadcaster) Send(arg1 broadcast.NginxAgentMessage) bool {
 	fake.sendMutex.Lock()
 	ret, specificReturn := fake.sendReturnsOnCall[len(fake.sendArgsForCall)]
 	fake.sendArgsForCall = append(fake.sendArgsForCall, struct {
@@ -86,9 +84,9 @@ func (fake *FakeBroadcaster) Send(arg1 broadcast.NginxAgentMessage) (bool, error
 		return stub(arg1)
 	}
 	if specificReturn {
-		return ret.result1, ret.result2
+		return ret.result1
 	}
-	return fakeReturns.result1, fakeReturns.result2
+	return fakeReturns.result1
 }
 
 func (fake *FakeBroadcaster) SendCallCount() int {
@@ -97,7 +95,7 @@ func (fake *FakeBroadcaster) SendCallCount() int {
 	return len(fake.sendArgsForCall)
 }
 
-func (fake *FakeBroadcaster) SendCalls(stub func(broadcast.NginxAgentMessage) (bool, error)) {
+func (fake *FakeBroadcaster) SendCalls(stub func(broadcast.NginxAgentMessage) bool) {
 	fake.sendMutex.Lock()
 	defer fake.sendMutex.Unlock()
 	fake.SendStub = stub
@@ -110,30 +108,27 @@ func (fake *FakeBroadcaster) SendArgsForCall(i int) broadcast.NginxAgentMessage 
 	return argsForCall.arg1
 }
 
-func (fake *FakeBroadcaster) SendReturns(result1 bool, result2 error) {
+func (fake *FakeBroadcaster) SendReturns(result1 bool) {
 	fake.sendMutex.Lock()
 	defer fake.sendMutex.Unlock()
 	fake.SendStub = nil
 	fake.sendReturns = struct {
 		result1 bool
-		result2 error
-	}{result1, result2}
+	}{result1}
 }
 
-func (fake *FakeBroadcaster) SendReturnsOnCall(i int, result1 bool, result2 error) {
+func (fake *FakeBroadcaster) SendReturnsOnCall(i int, result1 bool) {
 	fake.sendMutex.Lock()
 	defer fake.sendMutex.Unlock()
 	fake.SendStub = nil
 	if fake.sendReturnsOnCall == nil {
 		fake.sendReturnsOnCall = make(map[int]struct {
 			result1 bool
-			result2 error
 		})
 	}
 	fake.sendReturnsOnCall[i] = struct {
 		result1 bool
-		result2 error
-	}{result1, result2}
+	}{result1}
 }
 
 func (fake *FakeBroadcaster) Subscribe() broadcast.SubscriberChannels {

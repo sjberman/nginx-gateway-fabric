@@ -275,7 +275,7 @@ func TestBuildHTTPRouteStatuses(t *testing.T) {
 		map[graph.L4RouteKey]*graph.L4Route{},
 		routes,
 		transitionTime,
-		NginxReloadResult{},
+		graph.NginxReloadResult{},
 		gatewayCtlrName,
 	)
 
@@ -354,7 +354,7 @@ func TestBuildGRPCRouteStatuses(t *testing.T) {
 		map[graph.L4RouteKey]*graph.L4Route{},
 		routes,
 		transitionTime,
-		NginxReloadResult{},
+		graph.NginxReloadResult{},
 		gatewayCtlrName,
 	)
 
@@ -431,7 +431,7 @@ func TestBuildTLSRouteStatuses(t *testing.T) {
 		routes,
 		map[graph.RouteKey]*graph.L7Route{},
 		transitionTime,
-		NginxReloadResult{},
+		graph.NginxReloadResult{},
 		gatewayCtlrName,
 	)
 
@@ -535,7 +535,7 @@ func TestBuildRouteStatusesNginxErr(t *testing.T) {
 		map[graph.L4RouteKey]*graph.L4Route{},
 		routes,
 		transitionTime,
-		NginxReloadResult{Error: errors.New("test error")},
+		graph.NginxReloadResult{Error: errors.New("test error")},
 		gatewayCtlrName,
 	)
 
@@ -741,7 +741,7 @@ func TestBuildGatewayStatuses(t *testing.T) {
 	routeKey := graph.RouteKey{NamespacedName: types.NamespacedName{Namespace: "test", Name: "hr-1"}}
 
 	tests := []struct {
-		nginxReloadRes  NginxReloadResult
+		nginxReloadRes  graph.NginxReloadResult
 		gateway         *graph.Gateway
 		ignoredGateways map[types.NamespacedName]*v1.Gateway
 		expected        map[types.NamespacedName]v1.GatewayStatus
@@ -1133,7 +1133,7 @@ func TestBuildGatewayStatuses(t *testing.T) {
 					},
 				},
 			},
-			nginxReloadRes: NginxReloadResult{Error: errors.New("test error")},
+			nginxReloadRes: graph.NginxReloadResult{Error: errors.New("test error")},
 		},
 	}
 

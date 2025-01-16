@@ -2,6 +2,7 @@ package static
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -35,6 +36,7 @@ type handlerMetricsCollector interface {
 
 // eventHandlerConfig holds configuration parameters for eventHandlerImpl.
 type eventHandlerConfig struct {
+	ctx context.Context
 	// nginxUpdater updates nginx configuration using the NGINX agent.
 	nginxUpdater agent.NginxUpdater
 	// metricsCollector collects metrics for this controller.
@@ -59,6 +61,12 @@ type eventHandlerConfig struct {
 	deployCtxCollector licensing.Collector
 	// graphBuiltHealthChecker sets the health of the Pod to Ready once we've built our initial graph.
 	graphBuiltHealthChecker *graphBuiltHealthChecker
+	// statusQueue contains updates when the handler should write statuses.
+	statusQueue *status.Queue
+	// nginxDeployments contains a map of all nginx Deployments, and data about them.
+	nginxDeployments *agent.DeploymentStore
+	// logger is the logger for the event handler.
+	logger logr.Logger
 	// gatewayPodConfig contains information about this Pod.
 	gatewayPodConfig ngfConfig.GatewayPodConfig
 	// controlConfigNSName is the NamespacedName of the NginxGateway config for this controller.
@@ -102,7 +110,7 @@ type eventHandlerImpl struct {
 	// objectFilters contains all created objectFilters, with the key being a filterKey
 	objectFilters map[filterKey]objectFilter
 
-	latestReloadResult status.NginxReloadResult
+	// latestReloadResult status.NginxReloadResult
 
 	cfg  eventHandlerConfig
 	lock sync.Mutex
@@ -137,6 +145,8 @@ func newEventHandlerImpl(cfg eventHandlerConfig) *eventHandlerImpl {
 		},
 	}
 
+	go handler.waitForStatusUpdates(cfg.ctx)
+
 	return handler
 }
 
@@ -164,10 +174,22 @@ func (h *eventHandlerImpl) HandleEventBatch(ctx context.Context, logger logr.Log
 		h.cfg.graphBuiltHealthChecker.setAsReady()
 	}
 
+	// TODO(sberman): hardcode this deployment name until we support provisioning data planes
+	// If no deployments exist, we should just return without doing anything.
+	deploymentName := types.NamespacedName{
+		Name:      "tmp-nginx-deployment",
+		Namespace: h.cfg.gatewayPodConfig.Namespace,
+	}
+
 	// TODO(sberman): if nginx Deployment is scaled down, we should remove the pod from the ConnectionsTracker
+	// and Deployment.
 	// If fully deleted, then delete the deployment from the Store
-	var err error
 	var configApplied bool
+	deployment := h.cfg.nginxDeployments.GetOrStore(ctx, deploymentName)
+	if deployment == nil {
+		panic("expected deployment, got nil")
+	}
+
 	switch changeType {
 	case state.NoChange:
 		logger.Info("Handling events didn't result into NGINX configuration changes")
@@ -183,16 +205,13 @@ func (h *eventHandlerImpl) HandleEventBatch(ctx context.Context, logger logr.Log
 
 		h.setLatestConfiguration(&cfg)
 
+		deployment.Lock.Lock()
 		if h.cfg.plus {
-			// TODO(sberman): hardcode this deployment name until we support provisioning data planes
-			deployment := types.NamespacedName{
-				Name:      "tmp-nginx-deployment",
-				Namespace: h.cfg.gatewayPodConfig.Namespace,
-			}
-			configApplied, err = h.cfg.nginxUpdater.UpdateUpstreamServers(ctx, deployment, cfg)
+			configApplied = h.cfg.nginxUpdater.UpdateUpstreamServers(deployment, cfg)
 		} else {
-			configApplied, err = h.updateNginxConf(ctx, cfg)
+			configApplied = h.updateNginxConf(deployment, cfg)
 		}
+		deployment.Lock.Unlock()
 	case state.ClusterStateChange:
 		h.version++
 		cfg := dataplane.BuildConfiguration(ctx, gr, h.cfg.serviceResolver, h.version)
@@ -204,31 +223,53 @@ func (h *eventHandlerImpl) HandleEventBatch(ctx context.Context, logger logr.Log
 
 		h.setLatestConfiguration(&cfg)
 
-		configApplied, err = h.updateNginxConf(ctx, cfg)
+		deployment.Lock.Lock()
+		configApplied = h.updateNginxConf(deployment, cfg)
+		deployment.Lock.Unlock()
 	}
 
-	var nginxReloadRes status.NginxReloadResult
-	switch {
-	case err != nil:
-		logger.Error(err, "Failed to update NGINX configuration")
-		nginxReloadRes.Error = err
-	case configApplied:
-		logger.Info("NGINX configuration was successfully updated")
-	default:
-		logger.Info("No NGINX instances to configure")
-	}
-
-	h.latestReloadResult = nginxReloadRes
+	configErr := deployment.GetLatestConfigError()
+	upstreamErr := deployment.GetLatestUpstreamError()
+	err := errors.Join(configErr, upstreamErr)
 
 	if configApplied || err != nil {
-		h.updateStatuses(ctx, logger, gr)
+		obj := &status.QueueObject{
+			Error:      err,
+			Deployment: deploymentName,
+		}
+		h.cfg.statusQueue.Enqueue(obj)
 	}
 }
 
-func (h *eventHandlerImpl) updateStatuses(ctx context.Context, logger logr.Logger, gr *graph.Graph) {
+func (h *eventHandlerImpl) waitForStatusUpdates(ctx context.Context) {
+	for {
+		item := h.cfg.statusQueue.Dequeue(ctx)
+		if item == nil {
+			return
+		}
+
+		var nginxReloadRes graph.NginxReloadResult
+		switch {
+		case item.Error != nil:
+			h.cfg.logger.Error(item.Error, "Failed to update NGINX configuration")
+			nginxReloadRes.Error = item.Error
+		default:
+			h.cfg.logger.Info("NGINX configuration was successfully updated")
+		}
+
+		// TODO(sberman): once we support multiple Gateways, we'll have to get
+		// the correct Graph for the Deployment contained in the update message
+		gr := h.cfg.processor.GetLatestGraph()
+		gr.LatestReloadResult = nginxReloadRes
+
+		h.updateStatuses(ctx, gr)
+	}
+}
+
+func (h *eventHandlerImpl) updateStatuses(ctx context.Context, gr *graph.Graph) {
 	gwAddresses, err := getGatewayAddresses(ctx, h.cfg.k8sClient, nil, h.cfg.gatewayPodConfig)
 	if err != nil {
-		logger.Error(err, "Setting GatewayStatusAddress to Pod IP Address")
+		h.cfg.logger.Error(err, "Setting GatewayStatusAddress to Pod IP Address")
 	}
 
 	transitionTime := metav1.Now()
@@ -241,7 +282,7 @@ func (h *eventHandlerImpl) updateStatuses(ctx context.Context, logger logr.Logge
 		gr.L4Routes,
 		gr.Routes,
 		transitionTime,
-		h.latestReloadResult,
+		gr.LatestReloadResult,
 		h.cfg.gatewayCtlrName,
 	)
 
@@ -273,7 +314,7 @@ func (h *eventHandlerImpl) updateStatuses(ctx context.Context, logger logr.Logge
 		gr.IgnoredGateways,
 		transitionTime,
 		gwAddresses,
-		h.latestReloadResult,
+		gr.LatestReloadResult,
 	)
 	h.cfg.statusUpdater.UpdateGroup(ctx, groupGateways, gwReqs...)
 }
@@ -308,30 +349,19 @@ func (h *eventHandlerImpl) parseAndCaptureEvent(ctx context.Context, logger logr
 }
 
 // updateNginxConf updates nginx conf files and reloads nginx.
-func (h *eventHandlerImpl) updateNginxConf(ctx context.Context, conf dataplane.Configuration) (bool, error) {
+func (h *eventHandlerImpl) updateNginxConf(
+	deployment *agent.Deployment,
+	conf dataplane.Configuration,
+) bool {
 	files := h.cfg.generator.Generate(conf)
-
-	// TODO(sberman): hardcode this deployment name until we support provisioning data planes
-	deployment := types.NamespacedName{
-		Name:      "tmp-nginx-deployment",
-		Namespace: h.cfg.gatewayPodConfig.Namespace,
-	}
-
-	applied, err := h.cfg.nginxUpdater.UpdateConfig(ctx, deployment, files)
-	if err != nil {
-		return false, err
-	}
+	applied := h.cfg.nginxUpdater.UpdateConfig(deployment, files)
 
 	// If using NGINX Plus, update upstream servers using the API.
-	var plusApplied bool
-	if h.cfg.plus && applied {
-		plusApplied, err = h.cfg.nginxUpdater.UpdateUpstreamServers(ctx, deployment, conf)
-		if err != nil {
-			return false, err
-		}
+	if h.cfg.plus {
+		h.cfg.nginxUpdater.UpdateUpstreamServers(deployment, conf)
 	}
 
-	return applied || plusApplied, nil
+	return applied
 }
 
 // updateControlPlaneAndSetStatus updates the control plane configuration and then sets the status
@@ -508,7 +538,7 @@ func (h *eventHandlerImpl) nginxGatewayServiceUpsert(ctx context.Context, logger
 		gr.IgnoredGateways,
 		transitionTime,
 		gwAddresses,
-		h.latestReloadResult,
+		gr.LatestReloadResult,
 	)
 	h.cfg.statusUpdater.UpdateGroup(ctx, groupGateways, gatewayStatuses...)
 }
@@ -534,7 +564,7 @@ func (h *eventHandlerImpl) nginxGatewayServiceDelete(
 		gr.IgnoredGateways,
 		transitionTime,
 		gwAddresses,
-		h.latestReloadResult,
+		gr.LatestReloadResult,
 	)
 	h.cfg.statusUpdater.UpdateGroup(ctx, groupGateways, gatewayStatuses...)
 }

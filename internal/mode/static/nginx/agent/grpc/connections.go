@@ -6,6 +6,21 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
+//go:generate go run github.com/maxbrunsfeld/counterfeiter/v6 -generate
+
+//counterfeiter:generate . AgentConnectionsTracker
+
+// AgentConnectionsTracker defines an interface to track all connections between the control plane
+// and nginx agents.
+type AgentConnectionsTracker interface {
+	Track(key string, conn Connection)
+	GetConnection(key string) Connection
+	ConnectionIsReady(key string) (Connection, bool)
+	SetInstanceID(key, id string)
+	UntrackConnectionsForParent(parent types.NamespacedName)
+}
+
+// Connection contains the data about a single nginx agent connection.
 type Connection struct {
 	PodName    string
 	InstanceID string
@@ -21,7 +36,7 @@ type ConnectionsTracker struct {
 }
 
 // NewConnectionsTracker returns a new ConnectionsTracker instance.
-func NewConnectionsTracker() *ConnectionsTracker {
+func NewConnectionsTracker() AgentConnectionsTracker {
 	return &ConnectionsTracker{
 		connections: make(map[string]Connection),
 	}

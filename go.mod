@@ -8,7 +8,7 @@ require (
 	github.com/google/go-cmp v0.6.0
 	github.com/google/uuid v1.6.0
 	github.com/maxbrunsfeld/counterfeiter/v6 v6.11.2
-	github.com/nginx/agent/v3 v3.0.0-20241220140549-28adb688a8b4
+	github.com/nginx/agent/v3 v3.0.0-20250116154650-db82ebd210da
 	github.com/nginxinc/telemetry-exporter v0.1.2
 	github.com/onsi/ginkgo/v2 v2.22.1
 	github.com/onsi/gomega v1.36.1

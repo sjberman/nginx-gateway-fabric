@@ -11,6 +11,7 @@ import (
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"google.golang.org/grpc"
 	appsv1 "k8s.io/api/apps/v1"
+	authv1 "k8s.io/api/authentication/v1"
 	apiv1 "k8s.io/api/core/v1"
 	discoveryV1 "k8s.io/api/discovery/v1"
 	apiext "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
@@ -91,6 +92,7 @@ func init() {
 	utilruntime.Must(ngfAPIv1alpha2.AddToScheme(scheme))
 	utilruntime.Must(apiext.AddToScheme(scheme))
 	utilruntime.Must(appsv1.AddToScheme(scheme))
+	utilruntime.Must(authv1.AddToScheme(scheme))
 }
 
 func StartManager(cfg config.Config) error {
@@ -186,6 +188,7 @@ func StartManager(cfg config.Config) error {
 			nginxUpdater.CommandService.Register,
 			nginxUpdater.FileService.Register,
 		},
+		mgr.GetClient(),
 	)
 
 	if err = mgr.Add(&runnables.LeaderOrNonLeader{Runnable: grpcServer}); err != nil {
@@ -202,6 +205,7 @@ func StartManager(cfg config.Config) error {
 			EventRecorder:          recorder,
 			GatewayPodConfig:       &cfg.GatewayPodConfig,
 			GCName:                 cfg.GatewayClassName,
+			AgentTLSSecretName:     cfg.AgentTLSSecretName,
 			Plus:                   cfg.Plus,
 			NginxDockerSecretNames: cfg.NginxDockerSecretNames,
 			PlusUsageConfig:        &cfg.UsageReportConfig,

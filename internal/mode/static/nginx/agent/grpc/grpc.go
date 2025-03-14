@@ -2,15 +2,21 @@ package grpc
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"errors"
 	"fmt"
 	"net"
+	"os"
 	"time"
 
 	"github.com/go-logr/logr"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/status"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	"github.com/nginx/nginx-gateway-fabric/internal/mode/static/nginx/agent/grpc/interceptor"
@@ -19,6 +25,9 @@ import (
 const (
 	keepAliveTime    = 15 * time.Second
 	keepAliveTimeout = 10 * time.Second
+	caCertPath       = "/var/run/secrets/ngf/ca.crt"
+	tlsCertPath      = "/var/run/secrets/ngf/tls.crt"
+	tlsKeyPath       = "/var/run/secrets/ngf/tls.key"
 )
 
 var ErrStatusInvalidConnection = status.Error(codes.Unauthenticated, "invalid connection")
@@ -42,18 +51,28 @@ type Server struct {
 	port int
 }
 
-func NewServer(logger logr.Logger, port int, registerSvcs []func(*grpc.Server)) *Server {
+func NewServer(
+	logger logr.Logger,
+	port int,
+	registerSvcs []func(*grpc.Server),
+	k8sClient client.Client,
+) *Server {
 	return &Server{
 		logger:           logger,
 		port:             port,
 		registerServices: registerSvcs,
-		interceptor:      interceptor.NewContextSetter(),
+		interceptor:      interceptor.NewContextSetter(k8sClient),
 	}
 }
 
 // Start is a runnable that starts the gRPC server for communicating with the nginx agent.
 func (g *Server) Start(ctx context.Context) error {
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", g.port))
+	if err != nil {
+		return err
+	}
+
+	tlsCredentials, err := getTLSConfig()
 	if err != nil {
 		return err
 	}
@@ -73,6 +92,7 @@ func (g *Server) Start(ctx context.Context) error {
 		),
 		grpc.ChainStreamInterceptor(g.interceptor.Stream()),
 		grpc.ChainUnaryInterceptor(g.interceptor.Unary()),
+		grpc.Creds(tlsCredentials),
 	)
 
 	for _, registerSvc := range g.registerServices {
@@ -87,6 +107,34 @@ func (g *Server) Start(ctx context.Context) error {
 	}()
 
 	return server.Serve(listener)
+}
+
+func getTLSConfig() (credentials.TransportCredentials, error) {
+	caPem, err := os.ReadFile(caCertPath)
+	if err != nil {
+		return nil, err
+	}
+
+	certPool := x509.NewCertPool()
+	if !certPool.AppendCertsFromPEM(caPem) {
+		return nil, errors.New("error parsing CA PEM")
+	}
+
+	getCerficateCallback := func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+		fmt.Println("UPDATING CERTS")
+		serverCert, err := tls.LoadX509KeyPair(tlsCertPath, tlsKeyPath)
+		return &serverCert, err
+	}
+
+	tlsConfig := &tls.Config{
+		GetCertificate: getCerficateCallback,
+		// Certificates: []tls.Certificate{serverCert},
+		ClientAuth: tls.RequireAndVerifyClientCert,
+		ClientCAs:  certPool,
+		MinVersion: tls.VersionTLS13,
+	}
+
+	return credentials.NewTLS(tlsConfig), nil
 }
 
 var _ manager.Runnable = &Server{}

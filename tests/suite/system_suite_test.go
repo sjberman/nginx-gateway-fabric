@@ -144,10 +144,10 @@ func setup(cfg setupConfig, extraInstallArgs ...string) {
 	clusterInfo, err = resourceManager.GetClusterInfo()
 	Expect(err).ToNot(HaveOccurred())
 
-	if cfg.nfr && !clusterInfo.IsGKE {
-		skipNFRTests = true
-		Skip("NFR tests can only run in GKE")
-	}
+	// if cfg.nfr && !clusterInfo.IsGKE {
+	// 	skipNFRTests = true
+	// 	Skip("NFR tests can only run in GKE")
+	// }
 
 	if cfg.nfr && *serviceType != "LoadBalancer" {
 		skipNFRTests = true

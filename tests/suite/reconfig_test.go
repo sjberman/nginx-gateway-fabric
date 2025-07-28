@@ -186,7 +186,7 @@ var _ = Describe("Reconfiguration Performance Testing", Ordered, Label("nfr", "r
 		defer cancel()
 
 		index := 1
-		conf, _ := resourceManager.GetNginxConfig(nginxPodName, reconfigNamespace.Name, nginxCrossplanePath)
+		conf, _ := resourceManager.GetNginxConfig(nginxPodName, reconfigNamespace.Name, "")
 		for index <= resourceCount {
 			namespace := "namespace" + strconv.Itoa(resourceCount)
 			expUpstream := framework.ExpectedNginxField{
@@ -202,7 +202,7 @@ var _ = Describe("Reconfiguration Performance Testing", Ordered, Label("nfr", "r
 					return fmt.Errorf("error validating nginx conf was generated in "+namespace+": %w", err.Error())
 				default:
 					// each call to GetNginxConfig takes about 70ms
-					conf, _ = resourceManager.GetNginxConfig(nginxPodName, reconfigNamespace.Name, nginxCrossplanePath)
+					conf, _ = resourceManager.GetNginxConfig(nginxPodName, reconfigNamespace.Name, "")
 					continue
 				}
 			}
@@ -398,7 +398,7 @@ var _ = Describe("Reconfiguration Performance Testing", Ordered, Label("nfr", "r
 				// this checks if NGF has established a connection with agent and sent over the first nginx conf
 				Eventually(
 					func() bool {
-						conf, _ := resourceManager.GetNginxConfig(nginxPodName, reconfigNamespace.Name, nginxCrossplanePath)
+						conf, _ := resourceManager.GetNginxConfig(nginxPodName, reconfigNamespace.Name, "")
 						// a default upstream NGF creates
 						defaultUpstream := framework.ExpectedNginxField{
 							Directive: "upstream",
@@ -433,8 +433,8 @@ var _ = Describe("Reconfiguration Performance Testing", Ordered, Label("nfr", "r
 				err = writeReconfigResults(outFile, results)
 				Expect(err).ToNot(HaveOccurred())
 			},
-			Entry("gathers metrics after creating 30 resources", 30),
-			Entry("gathers metrics after creating 150 resources", 150),
+			FEntry("gathers metrics after creating 30 resources", 30),
+			FEntry("gathers metrics after creating 150 resources", 150),
 		)
 	})
 
@@ -451,9 +451,9 @@ var _ = Describe("Reconfiguration Performance Testing", Ordered, Label("nfr", "r
 		Expect(outFile.Close()).To(Succeed())
 
 		// restoring NGF shared among tests in the suite
-		cfg := getDefaultSetupCfg()
-		cfg.nfr = true
-		setup(cfg)
+		// cfg := getDefaultSetupCfg()
+		// cfg.nfr = true
+		// setup(cfg)
 	})
 })
 

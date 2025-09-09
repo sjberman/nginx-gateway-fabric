@@ -120,9 +120,14 @@ type route struct {
 
 // ScaleObjects contains objects for scale testing.
 type ScaleObjects struct {
-	// BaseObjects contains objects that are common to all scale iterations.
+	// BaseObjects contains objects that should be created first:
+	// secrets and other foundational resources.
 	BaseObjects []client.Object
-	// ScaleIterationGroups contains objects for each scale iteration.
+	// GatewayAndServiceObjects contains backend services, deployments, and Gateway objects.
+	// These are created after BaseObjects to ensure endpoints are ready before traffic.
+	GatewayAndServiceObjects []client.Object
+	// ScaleIterationGroups contains HTTPRoute objects for each scale iteration.
+	// These are applied after GatewayAndServiceObjects to start traffic flow incrementally.
 	ScaleIterationGroups [][]client.Object
 }
 
@@ -150,12 +155,15 @@ func decodeObjects(reader io.Reader) ([]client.Object, error) {
 }
 
 // GenerateScaleListenerObjects generates objects for a given number of listeners for the scale test.
+// Secrets are created first in BaseObjects, then backend services/deployments and Gateway in GatewayAndServiceObjects,
+// and finally HTTPRoutes in ScaleIterationGroups.
 func GenerateScaleListenerObjects(numListeners int, tls bool) (ScaleObjects, error) {
 	var result ScaleObjects
 
 	listeners := make([]listener, 0)
 	backends := make([]string, 0)
 	secrets := make([]string, 0)
+	routes := make([]route, 0)
 
 	for i := range numListeners {
 		listenerName := fmt.Sprintf("listener-%d", i)
@@ -180,30 +188,34 @@ func GenerateScaleListenerObjects(numListeners int, tls bool) (ScaleObjects, err
 			HostnamePrefix: hostnamePrefix,
 			BackendName:    backendName,
 		}
+		routes = append(routes, r)
 
 		backends = append(backends, backendName)
-
-		objects, err := generateManifests(listeners, []route{r})
-		if err != nil {
-			return ScaleObjects{}, err
-		}
-
-		result.ScaleIterationGroups = append(result.ScaleIterationGroups, objects)
 	}
 
 	secretObjects, err := generateSecrets(secrets)
 	if err != nil {
 		return ScaleObjects{}, err
 	}
-
 	result.BaseObjects = append(result.BaseObjects, secretObjects...)
 
 	backendObjects, err := generateBackendAppObjects(backends)
 	if err != nil {
 		return ScaleObjects{}, err
 	}
+	result.GatewayAndServiceObjects = append(result.GatewayAndServiceObjects, backendObjects...)
 
-	result.BaseObjects = append(result.BaseObjects, backendObjects...)
+	gatewayObjects, err := generateManifests(listeners, nil)
+	if err != nil {
+		return ScaleObjects{}, err
+	}
+	result.GatewayAndServiceObjects = append(result.GatewayAndServiceObjects, gatewayObjects...)
+
+	routeObjects, err := generateManifests(nil, routes)
+	if err != nil {
+		return ScaleObjects{}, err
+	}
+	result.ScaleIterationGroups = append(result.ScaleIterationGroups, routeObjects)
 
 	return result, nil
 }
@@ -240,6 +252,21 @@ func GenerateScaleHTTPRouteObjects(numRoutes int) (ScaleObjects, error) {
 
 	backendName := "backend"
 
+	// Generate backend objects and add to GatewayAndServiceObjects
+	backendObjects, err := generateBackendAppObjects([]string{backendName})
+	if err != nil {
+		return ScaleObjects{}, err
+	}
+	result.GatewayAndServiceObjects = append(result.GatewayAndServiceObjects, backendObjects...)
+
+	// Generate Gateway object and add to GatewayAndServiceObjects
+	gatewayObjects, err := generateManifests([]listener{l}, nil)
+	if err != nil {
+		return ScaleObjects{}, err
+	}
+	result.GatewayAndServiceObjects = append(result.GatewayAndServiceObjects, gatewayObjects...)
+
+	// Generate HTTPRoute objects for each iteration
 	for i := range numRoutes {
 		r := route{
 			Name:           fmt.Sprintf("route-%d", i),
@@ -248,26 +275,14 @@ func GenerateScaleHTTPRouteObjects(numRoutes int) (ScaleObjects, error) {
 			BackendName:    backendName,
 		}
 
-		var listeners []listener
-		if i == 0 {
-			// only generate a Gateway on the first iteration
-			listeners = []listener{l}
-		}
-
-		objects, err := generateManifests(listeners, []route{r})
+		// Generate only the HTTPRoute (no listeners/gateway)
+		routeObjects, err := generateManifests(nil, []route{r})
 		if err != nil {
 			return ScaleObjects{}, err
 		}
 
-		result.ScaleIterationGroups = append(result.ScaleIterationGroups, objects)
+		result.ScaleIterationGroups = append(result.ScaleIterationGroups, routeObjects)
 	}
-
-	backendObjects, err := generateBackendAppObjects([]string{backendName})
-	if err != nil {
-		return ScaleObjects{}, err
-	}
-
-	result.BaseObjects = backendObjects
 
 	return result, nil
 }

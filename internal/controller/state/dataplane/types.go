@@ -474,6 +474,8 @@ type Ratio struct {
 
 // Logging defines logging related settings for NGINX.
 type Logging struct {
+	// AccessLog defines the configuration for the NGINX access log.
+	AccessLog *AccessLog
 	// ErrorLevel defines the error log level.
 	ErrorLevel string
 }
@@ -495,4 +497,12 @@ type DeploymentContext struct {
 	ClusterNodeCount *int `json:"cluster_node_count,omitempty"`
 	// Integration is "ngf".
 	Integration string `json:"integration"`
+}
+
+// AccessLog defines the configuration for an NGINX access log.
+type AccessLog struct {
+	// Format is the access log format template.
+	Format string
+	// Disable specifies whether the access log is disabled.
+	Disable bool
 }

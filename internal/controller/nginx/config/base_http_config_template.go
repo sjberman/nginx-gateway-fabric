@@ -48,6 +48,19 @@ server {
     }
 }
 
+{{- /* Define custom log format */ -}}
+{{- /* We use a fixed name for user-defined log format to avoid complexity of passing the name around. */ -}}
+{{- if .AccessLog }}
+{{- if .AccessLog.Disable }}
+access_log off;
+{{- else }}
+{{- if .AccessLog.Format }}
+log_format {{ .AccessLog.FormatName }} '{{ .AccessLog.Format }}';
+access_log {{ .AccessLog.Path }} {{ .AccessLog.FormatName }};
+{{- end }}
+{{- end }}
+{{- end }}
+
 {{ range $i := .Includes -}}
 include {{ $i.Name }};
 {{ end -}}

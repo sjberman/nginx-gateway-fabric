@@ -28,6 +28,10 @@ const (
 	defaultErrorLogLevel           = "info"
 	DefaultWorkerConnections       = int32(1024)
 	DefaultNginxReadinessProbePort = int32(8081)
+	// DefaultLogFormatName is used when user provides custom access_log format.
+	DefaultLogFormatName = "ngf_user_defined_log_format"
+	// DefaultAccessLogPath is the default path for the access log.
+	DefaultAccessLogPath = "/dev/stdout"
 )
 
 // BuildConfiguration builds the Configuration from the Graph.
@@ -1206,6 +1210,8 @@ func convertAddresses(addresses []ngfAPIv1alpha2.RewriteClientIPAddress) []strin
 	return trustedAddresses
 }
 
+// buildLogging converts the API logging spec (currently singular LogFormat / AccessLog fields
+// in v1alpha2) into internal representation used by templates.
 func buildLogging(gateway *graph.Gateway) Logging {
 	logSettings := Logging{ErrorLevel: defaultErrorLogLevel}
 
@@ -1218,9 +1224,31 @@ func buildLogging(gateway *graph.Gateway) Logging {
 		if ngfProxy.Logging.ErrorLevel != nil {
 			logSettings.ErrorLevel = string(*ngfProxy.Logging.ErrorLevel)
 		}
+
+		srcLogSettings := ngfProxy.Logging
+
+		if accessLog := buildAccessLog(srcLogSettings); accessLog != nil {
+			logSettings.AccessLog = accessLog
+		}
 	}
 
 	return logSettings
+}
+
+func buildAccessLog(srcLogSettings *ngfAPIv1alpha2.NginxLogging) *AccessLog {
+	if srcLogSettings.AccessLog != nil {
+		if srcLogSettings.AccessLog.Disable != nil && *srcLogSettings.AccessLog.Disable {
+			return &AccessLog{Disable: true}
+		}
+
+		if srcLogSettings.AccessLog.Format != nil && *srcLogSettings.AccessLog.Format != "" {
+			return &AccessLog{
+				Format: *srcLogSettings.AccessLog.Format,
+			}
+		}
+	}
+
+	return nil
 }
 
 func buildWorkerConnections(gateway *graph.Gateway) int32 {

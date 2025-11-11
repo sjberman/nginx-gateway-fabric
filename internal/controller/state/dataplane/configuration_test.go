@@ -4768,12 +4768,15 @@ func TestBuildRewriteIPSettings(t *testing.T) {
 
 func TestBuildLogging(t *testing.T) {
 	defaultLogging := Logging{ErrorLevel: defaultErrorLogLevel}
+	logFormat := `'$remote_addr - $remote_user [$time_local] '
+							'"$request" $status $body_bytes_sent '
+							'"$http_referer" "$http_user_agent" '`
 
 	t.Parallel()
 	tests := []struct {
-		msg                string
-		gw                 *graph.Gateway
 		expLoggingSettings Logging
+		gw                 *graph.Gateway
+		msg                string
 	}{
 		{
 			msg:                "Gateway is nil",
@@ -4883,6 +4886,103 @@ func TestBuildLogging(t *testing.T) {
 				},
 			},
 			expLoggingSettings: Logging{ErrorLevel: "emerg"},
+		},
+		{
+			msg: "AccessLog configured",
+			gw: &graph.Gateway{
+				EffectiveNginxProxy: &graph.EffectiveNginxProxy{
+					Logging: &ngfAPIv1alpha2.NginxLogging{
+						ErrorLevel: helpers.GetPointer(ngfAPIv1alpha2.NginxLogLevelInfo),
+						AccessLog: &ngfAPIv1alpha2.NginxAccessLog{
+							Format: helpers.GetPointer(logFormat),
+						},
+					},
+				},
+			},
+			expLoggingSettings: Logging{
+				ErrorLevel: "info",
+				AccessLog: &AccessLog{
+					Format: logFormat,
+				},
+			},
+		},
+		{
+			msg: "AccessLog is configured and Disable = false",
+			gw: &graph.Gateway{
+				EffectiveNginxProxy: &graph.EffectiveNginxProxy{
+					Logging: &ngfAPIv1alpha2.NginxLogging{
+						ErrorLevel: helpers.GetPointer(ngfAPIv1alpha2.NginxLogLevelInfo),
+						AccessLog: &ngfAPIv1alpha2.NginxAccessLog{
+							Disable: helpers.GetPointer(false),
+							Format:  helpers.GetPointer(logFormat),
+						},
+					},
+				},
+			},
+			expLoggingSettings: Logging{
+				ErrorLevel: "info",
+
+				AccessLog: &AccessLog{
+					Disable: false,
+					Format:  logFormat,
+				},
+			},
+		},
+		{
+			msg: "Nothing configured if AccessLog Format is missing",
+			gw: &graph.Gateway{
+				EffectiveNginxProxy: &graph.EffectiveNginxProxy{
+					Logging: &ngfAPIv1alpha2.NginxLogging{
+						ErrorLevel: helpers.GetPointer(ngfAPIv1alpha2.NginxLogLevelInfo),
+						AccessLog: &ngfAPIv1alpha2.NginxAccessLog{
+							Disable: helpers.GetPointer(false),
+						},
+					},
+				},
+			},
+			expLoggingSettings: Logging{
+				ErrorLevel: "info",
+				AccessLog:  nil,
+			},
+		},
+		{
+			msg: "AccessLog OFF while LogFormat is configured",
+			gw: &graph.Gateway{
+				EffectiveNginxProxy: &graph.EffectiveNginxProxy{
+					Logging: &ngfAPIv1alpha2.NginxLogging{
+						ErrorLevel: helpers.GetPointer(ngfAPIv1alpha2.NginxLogLevelInfo),
+						AccessLog: &ngfAPIv1alpha2.NginxAccessLog{
+							Disable: helpers.GetPointer(true),
+							Format:  helpers.GetPointer(logFormat),
+						},
+					},
+				},
+			},
+			expLoggingSettings: Logging{
+				ErrorLevel: "info",
+				AccessLog: &AccessLog{
+					Disable: true,
+				},
+			},
+		},
+		{
+			msg: "AccessLog OFF",
+			gw: &graph.Gateway{
+				EffectiveNginxProxy: &graph.EffectiveNginxProxy{
+					Logging: &ngfAPIv1alpha2.NginxLogging{
+						ErrorLevel: helpers.GetPointer(ngfAPIv1alpha2.NginxLogLevelInfo),
+						AccessLog: &ngfAPIv1alpha2.NginxAccessLog{
+							Disable: helpers.GetPointer(true),
+						},
+					},
+				},
+			},
+			expLoggingSettings: Logging{
+				ErrorLevel: "info",
+				AccessLog: &AccessLog{
+					Disable: true,
+				},
+			},
 		},
 	}
 

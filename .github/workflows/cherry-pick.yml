@@ -1,0 +1,59 @@
+name: Cherry-pick to Latest Release Branch
+
+on:
+  pull_request:
+    types:
+      - closed
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  cherry-pick:
+    if: ${{ contains(github.event.pull_request.labels.*.name, 'needs cherry pick') && github.event.pull_request.merged == true }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Set release branch variable
+        id: branch
+        run: |
+          branch=$(git branch -a | egrep '^\s+remotes/origin/release' | awk '{print $1}' | sort -u | tail -n 1)
+          release_branch=$(basename ${branch})
+          echo "branch=${release_branch}" >> $GITHUB_OUTPUT
+          cat $GITHUB_OUTPUT
+
+      - name: Create cherry-pick branch
+        id: create_branch
+        run: |
+          git config user.name "nginx-bot"
+          git config user.email "integrations@nginx.com"
+          pr_branch="${{ github.event.pull_request.head.ref }}"
+          cherry_branch="${pr_branch}-cherrypick"
+          git checkout ${{ steps.branch.outputs.branch }}
+          git checkout -b "$cherry_branch"
+          git cherry-pick -m 1 ${{ github.event.pull_request.merge_commit_sha }}
+          git push origin "$cherry_branch"
+          echo "cherry_branch=$cherry_branch" >> $GITHUB_OUTPUT
+
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@c0f553fe549906ede9cf27b5156039d195d2ece0 # v8.1.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          author: nginx-bot <integrations@nginx.com>
+          committer: nginx-bot <integrations@nginx.com>
+          branch: ${{ steps.create_branch.outputs.cherry_branch }}
+          base: ${{ steps.branch.outputs.branch }}
+          title: ${{ github.event.pull_request.title }}
+          body: |
+            Cherry-pick of #${{ github.event.pull_request.number }}
+
+            ${{ github.event.pull_request.body }}

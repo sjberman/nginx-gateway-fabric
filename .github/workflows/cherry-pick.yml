@@ -37,4 +37,4 @@ jobs:
           branch: ${{ steps.branch.outputs.branch }}
           token: ${{ secrets.GITHUB_TOKEN }}
           author: ${{ github.actor }} <${{ github.actor_id }}+${{ github.actor }}@users.noreply.github.com>
-          cherry-pick-branch: ${inputs.branch}-cherrypick
+          cherry-pick-branch: ${{ github.event.pull_request.head.ref }}-cherrypick

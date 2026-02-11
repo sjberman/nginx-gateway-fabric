@@ -192,7 +192,7 @@ var _ = Describe("eventHandler", func() {
 		When("a batch has one event", func() {
 			It("should process Upsert", func() {
 				e := &events.UpsertEvent{Resource: &gatewayv1.HTTPRoute{}}
-				batch := []interface{}{e}
+				batch := []any{e}
 
 				handler.HandleEventBatch(context.Background(), logr.Discard(), batch)
 
@@ -209,7 +209,7 @@ var _ = Describe("eventHandler", func() {
 					Type:           &gatewayv1.HTTPRoute{},
 					NamespacedName: types.NamespacedName{Namespace: "test", Name: "route"},
 				}
-				batch := []interface{}{e}
+				batch := []any{e}
 
 				handler.HandleEventBatch(context.Background(), logr.Discard(), batch)
 
@@ -226,7 +226,7 @@ var _ = Describe("eventHandler", func() {
 				fakeProcessor.ProcessReturns(&graph.Graph{})
 
 				e := &events.UpsertEvent{Resource: &gatewayv1.HTTPRoute{}}
-				batch := []interface{}{e}
+				batch := []any{e}
 
 				handler.HandleEventBatch(context.Background(), logr.Discard(), batch)
 
@@ -243,7 +243,7 @@ var _ = Describe("eventHandler", func() {
 				fakeProcessor.ProcessReturns(nil)
 
 				e := &events.UpsertEvent{Resource: &gatewayv1.HTTPRoute{}}
-				batch := []interface{}{e}
+				batch := []any{e}
 
 				handler.HandleEventBatch(context.Background(), logr.Discard(), batch)
 
@@ -272,7 +272,7 @@ var _ = Describe("eventHandler", func() {
 				})
 
 				e := &events.UpsertEvent{Resource: &gatewayv1.HTTPRoute{}}
-				batch := []interface{}{e}
+				batch := []any{e}
 
 				handler.HandleEventBatch(context.Background(), logr.Discard(), batch)
 
@@ -292,7 +292,7 @@ var _ = Describe("eventHandler", func() {
 					Type:           &gatewayv1.HTTPRoute{},
 					NamespacedName: types.NamespacedName{Namespace: "test", Name: "route"},
 				}
-				batch := []interface{}{upsertEvent, deleteEvent}
+				batch := []any{upsertEvent, deleteEvent}
 
 				handler.HandleEventBatch(context.Background(), logr.Discard(), batch)
 
@@ -326,7 +326,7 @@ var _ = Describe("eventHandler", func() {
 		}
 
 		It("handles a valid config", func() {
-			batch := []interface{}{&events.UpsertEvent{Resource: cfg(ngfAPI.ControllerLogLevelError)}}
+			batch := []any{&events.UpsertEvent{Resource: cfg(ngfAPI.ControllerLogLevelError)}}
 			handler.HandleEventBatch(context.Background(), logr.Discard(), batch)
 
 			Expect(handler.GetLatestConfiguration()).To(BeEmpty())
@@ -345,7 +345,7 @@ var _ = Describe("eventHandler", func() {
 		})
 
 		It("handles an invalid config", func() {
-			batch := []interface{}{&events.UpsertEvent{Resource: cfg(ngfAPI.ControllerLogLevel("invalid"))}}
+			batch := []any{&events.UpsertEvent{Resource: cfg(ngfAPI.ControllerLogLevel("invalid"))}}
 			handler.HandleEventBatch(context.Background(), logr.Discard(), batch)
 
 			Expect(handler.GetLatestConfiguration()).To(BeEmpty())
@@ -369,7 +369,7 @@ var _ = Describe("eventHandler", func() {
 		})
 
 		It("handles a deleted config", func() {
-			batch := []interface{}{
+			batch := []any{
 				&events.DeleteEvent{
 					Type: &ngfAPI.NginxGateway{},
 					NamespacedName: types.NamespacedName{
@@ -405,7 +405,7 @@ var _ = Describe("eventHandler", func() {
 				Namespace: "nginx-gateway",
 			},
 		}}
-		batch := []interface{}{e}
+		batch := []any{e}
 
 		BeforeEach(func() {
 			fakeProcessor.ProcessReturns(&graph.Graph{
@@ -504,7 +504,7 @@ var _ = Describe("eventHandler", func() {
 
 	It("should update nginx conf only when leader", func() {
 		e := &events.UpsertEvent{Resource: &gatewayv1.HTTPRoute{}}
-		batch := []interface{}{e}
+		batch := []any{e}
 		readyChannel := handler.cfg.graphBuiltHealthChecker.getReadyCh()
 
 		fakeProcessor.ProcessReturns(&graph.Graph{
@@ -647,7 +647,7 @@ var _ = Describe("eventHandler", func() {
 		e := &struct{}{}
 
 		handle := func() {
-			batch := []interface{}{e}
+			batch := []any{e}
 			handler.HandleEventBatch(context.Background(), logr.Discard(), batch)
 		}
 
@@ -693,7 +693,7 @@ var _ = Describe("eventHandler", func() {
 		fakeProcessor.ProcessReturns(gatewayWithVolumeMounts)
 
 		e := &events.UpsertEvent{Resource: &gatewayv1.HTTPRoute{}}
-		batch := []interface{}{e}
+		batch := []any{e}
 
 		handler.HandleEventBatch(context.Background(), logr.Discard(), batch)
 
@@ -742,7 +742,7 @@ var _ = Describe("eventHandler", func() {
 		fakeProcessor.ProcessReturns(gatewayWithVolumeMounts)
 
 		e := &events.UpsertEvent{Resource: &gatewayv1.HTTPRoute{}}
-		batch := []interface{}{e}
+		batch := []any{e}
 
 		handler.HandleEventBatch(context.Background(), logr.Discard(), batch)
 

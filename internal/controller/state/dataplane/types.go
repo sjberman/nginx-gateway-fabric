@@ -641,6 +641,8 @@ type SpanAttribute struct {
 type BaseHTTPConfig struct {
 	// DNSResolver defines the DNS resolver configuration for NGINX.
 	DNSResolver *DNSResolverConfig
+	// Compression defines the compression settings for NGINX.
+	Compression *CompressionSettings
 	// DisableBaseProxySetHeaders specifies which default proxy_set_header entries should be omitted.
 	DisableBaseProxySetHeaders []string
 	// IPFamily specifies the IP family for all servers.
@@ -691,6 +693,28 @@ type DNSResolverConfig struct {
 	Addresses []string
 	// DisableIPv6 specifies whether to disable DisableIPv6 lookups.
 	DisableIPv6 bool
+}
+
+// CompressionSettings defines the compression configuration for NGINX.
+type CompressionSettings struct {
+	// MinLength is the minimum response length to compress.
+	MinLength *int32
+	// BufferSize is the size of each compression buffer.
+	BufferSize string
+	// HTTPVersion is the minimum HTTP version required for compression.
+	HTTPVersion string
+	// MimeTypes specifies the MIME types to compress.
+	MimeTypes []string
+	// Proxied specifies the proxied request conditions for compression.
+	Proxied []string
+	// Disable specifies User-Agent regex patterns to disable compression.
+	Disable []string
+	// Level is the compression level (1-9).
+	Level int32
+	// BufferNumber is the number of compression buffers.
+	BufferNumber int32
+	// Vary enables the "Vary: Accept-Encoding" response header.
+	Vary bool
 }
 
 // RewriteIPModeType specifies the mode for rewriting the client IP.

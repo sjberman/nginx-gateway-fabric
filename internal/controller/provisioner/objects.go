@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"net"
 	"sort"
 	"strconv"
 	"strings"
@@ -162,7 +163,7 @@ func (p *NginxProvisioner) buildNginxResourceObjects(
 		ports = appendUniquePortProtoEntry(ports, portProtoEntry{Port: healthcheckPort, Protocol: corev1.ProtocolTCP})
 	}
 
-	service, err := buildNginxService(
+	service, err := p.buildNginxService(
 		cloneObjectMeta(objectMeta),
 		nProxyCfg,
 		ports,
@@ -661,7 +662,7 @@ func (p *NginxProvisioner) buildOpenshiftObjects(
 	return []client.Object{role, roleBinding}, errs
 }
 
-func buildNginxService(
+func (p *NginxProvisioner) buildNginxService(
 	objectMeta metav1.ObjectMeta,
 	nProxyCfg *graph.EffectiveNginxProxy,
 	ports []portProtoEntry,
@@ -681,13 +682,13 @@ func buildNginxService(
 
 	var externalIPs []string
 	for _, addr := range addresses {
-		if addr.Type != nil && *addr.Type == gatewayv1.IPAddressType {
+		if addr.Type != nil && *addr.Type == gatewayv1.IPAddressType && net.ParseIP(addr.Value) != nil {
 			externalIPs = append(externalIPs, addr.Value)
 		}
 	}
 
 	var servicePolicy corev1.ServiceExternalTrafficPolicy
-	if serviceType != corev1.ServiceTypeClusterIP || len(externalIPs) > 0 {
+	if serviceType != corev1.ServiceTypeClusterIP {
 		servicePolicy = defaultServicePolicy
 		if serviceCfg.ExternalTrafficPolicy != nil {
 			servicePolicy = corev1.ServiceExternalTrafficPolicy(*serviceCfg.ExternalTrafficPolicy)
@@ -702,7 +703,6 @@ func buildNginxService(
 			Type:                  serviceType,
 			Ports:                 servicePorts,
 			ExternalTrafficPolicy: servicePolicy,
-			ExternalIPs:           externalIPs,
 			Selector:              selectorLabels,
 			IPFamilyPolicy:        helpers.GetPointer(corev1.IPFamilyPolicyPreferDualStack),
 		},
@@ -712,14 +712,29 @@ func buildNginxService(
 
 	setSvcLoadBalancerSettings(serviceCfg, &svc.Spec)
 
-	// Apply service patches
+	// Apply service patches before the LoadBalancerClass check so that a patch-provided
+	// class is visible when we decide whether to set our own.
 	if nProxyCfg != nil && nProxyCfg.Kubernetes != nil && nProxyCfg.Kubernetes.Service != nil {
 		if err := applyPatches(svc, nProxyCfg.Kubernetes.Service.Patches); err != nil {
 			return svc, fmt.Errorf("failed to apply service patches: %w", err)
 		}
 	}
 
+	p.updateLoadBalancerClass(svc, externalIPs)
+
 	return svc, nil
+}
+
+// updateLoadBalancerClass sets the Service's LoadBalancerClass to this controller
+// if the Gateway has IP addresses and the Service is a LoadBalancer.
+func (p *NginxProvisioner) updateLoadBalancerClass(
+	svc *corev1.Service,
+	gwExternalIPs []string,
+) {
+	if svc.Spec.Type == corev1.ServiceTypeLoadBalancer && len(gwExternalIPs) > 0 {
+		ctlr := p.cfg.GatewayCtlrName
+		svc.Spec.LoadBalancerClass = &ctlr
+	}
 }
 
 func buildServicePorts(

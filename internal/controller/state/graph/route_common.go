@@ -1324,7 +1324,8 @@ func isRouteNamespaceAllowedByListener(
 
 			ns, exists := namespaces[types.NamespacedName{Name: routeNS}]
 			if !exists {
-				panic(fmt.Errorf("route namespace %q not found in map", routeNS))
+				// Namespace not found; deny attachment.
+				return false
 			}
 			return listener.AllowedRouteLabelSelector.Matches(labels.Set(ns.Labels))
 		}
